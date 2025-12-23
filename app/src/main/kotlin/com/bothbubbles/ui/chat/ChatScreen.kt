@@ -498,8 +498,9 @@ fun ChatScreen(
                         },
                         onDetailsClick = onDetailsClick,
                         onVideoCallClick = { state.showVideoCallDialog = true },
-                        onReelsClick = {
+                        onReelsClick = { unwatchedOnly ->
                             state.reelsFeedStartIndex = 0
+                            state.reelsFeedUnwatchedOnly = unwatchedOnly
                             state.showReelsFeed = true
                         },
                         onLife360MapClick = onLife360MapClick,
@@ -999,6 +1000,7 @@ fun ChatScreen(
         ReelsFeedScreen(
             reels = reelsState.reelItems,
             initialIndex = state.reelsFeedStartIndex,
+            initialUnwatchedOnly = state.reelsFeedUnwatchedOnly,
             onClose = { state.showReelsFeed = false },
             onTapback = { messageGuid, url, tapback ->
                 // Update local state

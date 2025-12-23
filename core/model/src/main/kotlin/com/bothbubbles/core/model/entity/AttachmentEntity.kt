@@ -113,7 +113,14 @@ data class AttachmentEntity(
      * Used for exponential backoff in AttachmentDownloadQueue.
      */
     @ColumnInfo(name = "retry_count")
-    val retryCount: Int = 0
+    val retryCount: Int = 0,
+
+    /**
+     * Whether this video attachment has been viewed in the Reels feed.
+     * Used for tracking watched vs unwatched state for video attachments.
+     */
+    @ColumnInfo(name = "viewed_in_reels", defaultValue = "0")
+    val viewedInReels: Boolean = false
 ) {
     /**
      * MIME type category (image, video, audio, etc.)

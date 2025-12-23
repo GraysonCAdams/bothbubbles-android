@@ -13,6 +13,8 @@ import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
@@ -56,7 +58,7 @@ fun ChatTopBar(
     onBackClick: () -> Unit,
     onDetailsClick: () -> Unit,
     onVideoCallClick: () -> Unit,
-    onReelsClick: () -> Unit,
+    onReelsClick: (unwatchedOnly: Boolean) -> Unit,
     onLife360MapClick: (participantAddress: String) -> Unit,
     onMenuAction: (ChatMenuAction) -> Unit,
     modifier: Modifier = Modifier,
@@ -131,7 +133,7 @@ private fun ChatTopBarContent(
     onBackClick: () -> Unit,
     onDetailsClick: () -> Unit,
     onVideoCallClick: () -> Unit,
-    onReelsClick: () -> Unit,
+    onReelsClick: (unwatchedOnly: Boolean) -> Unit,
     onMenuAction: (ChatMenuAction) -> Unit,
     modifier: Modifier = Modifier,
     isBubbleMode: Boolean = false
@@ -221,28 +223,62 @@ private fun ChatTopBarContent(
                 }
             } else {
                 // Reels button - shown for all chats when enabled and has videos
-                // Shows badge with unwatched count in bottom-right
+                // Shows badge with unwatched count in bottom-right, dropdown menu if unwatched exist
                 if (reelsFeedEnabled && hasReelVideos) {
-                    BadgedBox(
-                        badge = {
-                            if (unwatchedReelsCount > 0) {
-                                Badge(
-                                    containerColor = MaterialTheme.colorScheme.error,
-                                    contentColor = MaterialTheme.colorScheme.onError,
-                                    modifier = Modifier.semantics {
-                                        contentDescription = "$unwatchedReelsCount unwatched reels"
+                    var showReelsMenu = remember { mutableStateOf(false) }
+
+                    Box {
+                        BadgedBox(
+                            badge = {
+                                if (unwatchedReelsCount > 0) {
+                                    Badge(
+                                        containerColor = MaterialTheme.colorScheme.error,
+                                        contentColor = MaterialTheme.colorScheme.onError,
+                                        modifier = Modifier.semantics {
+                                            contentDescription = "$unwatchedReelsCount unwatched reels"
+                                        }
+                                    ) {
+                                        Text(
+                                            text = if (unwatchedReelsCount > 99) "99+" else unwatchedReelsCount.toString(),
+                                            style = MaterialTheme.typography.labelSmall
+                                        )
                                     }
-                                ) {
-                                    Text(
-                                        text = if (unwatchedReelsCount > 99) "99+" else unwatchedReelsCount.toString(),
-                                        style = MaterialTheme.typography.labelSmall
-                                    )
                                 }
                             }
+                        ) {
+                            IconButton(
+                                onClick = {
+                                    // If unwatched exist, show dropdown menu; otherwise go straight to all reels
+                                    if (unwatchedReelsCount > 0) {
+                                        showReelsMenu.value = true
+                                    } else {
+                                        onReelsClick(false)
+                                    }
+                                }
+                            ) {
+                                Icon(Icons.Default.Subscriptions, contentDescription = "Reels feed")
+                            }
                         }
-                    ) {
-                        IconButton(onClick = onReelsClick) {
-                            Icon(Icons.Default.Subscriptions, contentDescription = "Reels feed")
+
+                        // Dropdown menu for selecting unwatched only or all reels
+                        DropdownMenu(
+                            expanded = showReelsMenu.value,
+                            onDismissRequest = { showReelsMenu.value = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Unwatched only ($unwatchedReelsCount)") },
+                                onClick = {
+                                    showReelsMenu.value = false
+                                    onReelsClick(true)
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("All reels") },
+                                onClick = {
+                                    showReelsMenu.value = false
+                                    onReelsClick(false)
+                                }
+                            )
                         }
                     }
                 }

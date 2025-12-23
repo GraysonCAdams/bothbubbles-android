@@ -82,6 +82,17 @@ class SocialMediaLinkMigrationHelper @Inject constructor(
                     Timber.e(e, "[SocialMediaMigration] Metadata repair failed")
                 }
             }
+
+            // Always deduplicate cache to clean up any duplicate entries
+            // (from before we normalized URLs before hashing)
+            try {
+                val removed = cacheManager.deduplicateCache()
+                if (removed > 0) {
+                    Timber.i("[SocialMediaMigration] Removed $removed duplicate cache entries")
+                }
+            } catch (e: Exception) {
+                Timber.w(e, "[SocialMediaMigration] Cache deduplication failed")
+            }
         }
     }
 
@@ -209,44 +220,59 @@ class SocialMediaLinkMigrationHelper @Inject constructor(
             throw IllegalStateException("No messages available for metadata repair")
         }
 
-        // Build a map of URL -> message info for quick lookup
+        // Build a map of normalized URL -> message info for quick lookup
+        // Normalize URLs to just the video ID portion to handle query param differences
         val urlToMessage = mutableMapOf<String, com.bothbubbles.core.model.entity.MessageEntity>()
         for (message in socialMediaMessages) {
             val text = message.text ?: continue
             val urls = extractSocialMediaUrls(text)
             for (url in urls) {
+                val normalizedUrl = normalizeUrl(url)
                 // First match wins (oldest message with this URL)
-                if (!urlToMessage.containsKey(url)) {
-                    urlToMessage[url] = message
+                if (!urlToMessage.containsKey(normalizedUrl)) {
+                    urlToMessage[normalizedUrl] = message
                 }
             }
         }
 
         var repairedCount = 0
         for (video in cachedVideos) {
-            // Check if this video has "You" as sender but shouldn't
-            if (video.senderName == "You") {
-                val originalMessage = urlToMessage[video.originalUrl]
+            val normalizedVideoUrl = normalizeUrl(video.originalUrl)
+            val originalMessage = urlToMessage[normalizedVideoUrl]
 
-                if (originalMessage != null && !originalMessage.isFromMe) {
-                    // This video was NOT from the user, but was incorrectly marked as "You"
-                    // Look up the actual sender's display name
-                    val senderAddress = originalMessage.senderAddress
-                    val handle = senderAddress?.let { handleRepository.getHandleByAddressAny(it) }
-                    val correctSenderName = handle?.cachedDisplayName
+            // Skip if we can't find the original message
+            if (originalMessage == null) continue
+
+            // Check if this video needs repair:
+            // 1. senderName is "You" but message is not from me
+            // 2. senderName is empty/blank but we have sender info
+            val needsRepair = when {
+                video.senderName == "You" && !originalMessage.isFromMe -> true
+                video.senderName.isNullOrBlank() && originalMessage.senderAddress != null -> true
+                else -> false
+            }
+
+            if (needsRepair) {
+                val senderAddress = originalMessage.senderAddress
+                val handle = senderAddress?.let { handleRepository.getHandleByAddressAny(it) }
+                val correctSenderName = if (originalMessage.isFromMe) {
+                    "You"
+                } else {
+                    handle?.cachedDisplayName
                         ?: handle?.inferredName
                         ?: senderAddress
-
-                    // Update the cached metadata
-                    cacheManager.updateVideoMetadata(
-                        originalUrl = video.originalUrl,
-                        senderName = correctSenderName,
-                        senderAddress = senderAddress
-                    )
-
-                    repairedCount++
-                    Timber.d("[SocialMediaMigration] Repaired metadata for ${video.originalUrl.take(50)}: '$correctSenderName' (was 'You')")
+                        ?: "Unknown"
                 }
+
+                // Update the cached metadata
+                cacheManager.updateVideoMetadata(
+                    originalUrl = video.originalUrl,
+                    senderName = correctSenderName,
+                    senderAddress = senderAddress
+                )
+
+                repairedCount++
+                Timber.d("[SocialMediaMigration] Repaired metadata for ${video.originalUrl.take(50)}: '$correctSenderName' (was '${video.senderName}')")
             }
         }
 
@@ -266,6 +292,26 @@ class SocialMediaLinkMigrationHelper @Inject constructor(
         urls.addAll(TIKTOK_PATTERN.findAll(text).map { it.value })
 
         return urls.distinct()
+    }
+
+    /**
+     * Normalize URL by extracting just the base path (without query params or trailing junk).
+     * This handles URLs like:
+     * - https://www.instagram.com/reel/DSleht5E4HE/?igsh=MTZ0ejBzdjlrNjM3Mg=="
+     * - https://www.instagram.com/reel/DSleht5E4HE/?igsh=MTZ0ejBzdjlrNjM3Mg==
+     * Both normalize to: https://www.instagram.com/reel/DSleht5E4HE/
+     */
+    private fun normalizeUrl(url: String): String {
+        return try {
+            // Strip query params and any trailing quotes/junk
+            val cleanUrl = url.replace("\"", "").replace("'", "")
+            val uri = android.net.Uri.parse(cleanUrl)
+            val pathOnly = uri.path?.trimEnd('/') ?: ""
+            "${uri.scheme}://${uri.host}$pathOnly"
+        } catch (e: Exception) {
+            // Fallback: just strip everything after ?
+            url.substringBefore("?").trimEnd('/')
+        }
     }
 
     /**

@@ -74,6 +74,8 @@ class ChatScreenState(
     var showReelsFeed by mutableStateOf(showReelsFeed)
     /** Index of reel to start at when opening feed from a specific video */
     var reelsFeedStartIndex by mutableStateOf(0)
+    /** Whether to show only unwatched reels when opening feed */
+    var reelsFeedUnwatchedOnly by mutableStateOf(false)
 
     // ===== Selection / Data =====
     var pendingContactData by mutableStateOf<ContactData?>(null)

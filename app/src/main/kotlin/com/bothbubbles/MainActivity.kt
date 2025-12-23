@@ -181,9 +181,10 @@ class MainActivity : ComponentActivity() {
 
                 // Handle imto scheme for group chat IM contacts
                 // Format: imto://BothBubbles/{unifiedChatId} or imto:BothBubbles:{unifiedChatId}
+                // Note: Android/Google Contacts may lowercase the host, so compare case-insensitively
                 if (data.scheme == "imto") {
                     val host = data.host ?: data.schemeSpecificPart?.substringBefore(":")
-                    if (host == "BothBubbles") {
+                    if (host?.equals("BothBubbles", ignoreCase = true) == true) {
                         // Extract unified chat ID - could be in path or after second colon
                         val unifiedChatId = data.pathSegments?.firstOrNull()
                             ?: data.schemeSpecificPart?.substringAfter(":")?.substringAfter(":")

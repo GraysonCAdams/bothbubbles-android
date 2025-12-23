@@ -104,15 +104,19 @@ class ChatReelsDelegate @Inject constructor(
                 !video.viewedInReels && video.sentTimestamp > initialSyncCompleteTimestamp
             }
 
-            // Combine cached social media and attachment items, then sort by timestamp
+            // Combine cached social media and attachment items
             val cachedReelItems = sortAndMapVideos(cachedVideos)
             val allItems = (cachedReelItems + attachmentItems + pendingItems)
-                .sortedByDescending { it.sentTimestamp }
+
+            // Sort based on whether there are unwatched items:
+            // - If unwatched exist: unwatched (newest→oldest) + watched (oldest→newest)
+            // - If all watched: watched (newest→oldest)
+            val sortedItems = sortReelsForDisplay(allItems)
 
             _state.value = ReelsState(
                 isEnabled = isEnabled,
                 cachedVideos = cachedVideos,
-                reelItems = allItems,
+                reelItems = sortedItems,
                 unwatchedCount = unwatchedCount
             )
         }
@@ -139,7 +143,7 @@ class ChatReelsDelegate @Inject constructor(
 
                 val platform = downloadService.detectPlatform(link.url) ?: continue
 
-                // Look up sender display name
+                // Look up sender display name and avatar
                 val handle = link.senderAddress?.let { handleRepository.getHandleByAddressAny(it) }
 
                 pendingItems.add(
@@ -150,7 +154,8 @@ class ChatReelsDelegate @Inject constructor(
                         chatGuid = chatGuid,
                         senderName = if (link.isFromMe) "You" else (handle?.cachedDisplayName ?: handle?.inferredName),
                         senderAddress = link.senderAddress,
-                        sentTimestamp = link.sentTimestamp
+                        sentTimestamp = link.sentTimestamp,
+                        avatarPath = handle?.cachedAvatarPath
                     )
                 )
                 Timber.d("[Reels] Added pending item: ${link.url} from message ${link.messageGuid}")
@@ -240,7 +245,7 @@ class ChatReelsDelegate @Inject constructor(
                     senderAddress = video.senderAddress,
                     sentTimestamp = video.dateCreated,
                     isFromMe = video.isFromMe,
-                    viewedInReels = false // TODO: Track viewed state for attachments
+                    viewedInReels = video.attachment.viewedInReels
                 )
 
                 ReelItem.fromAttachment(
@@ -343,6 +348,29 @@ class ChatReelsDelegate @Inject constructor(
     }
 
     /**
+     * Sorts reel items for display based on watched state:
+     * - If unwatched items exist: unwatched (newest→oldest) + watched (oldest→newest)
+     * - If all watched: watched (newest→oldest)
+     *
+     * This ensures users see all unwatched content first, then transition to older watched content,
+     * and the "You're all caught up!" toast appears at the correct boundary.
+     */
+    private fun sortReelsForDisplay(items: List<ReelItem>): List<ReelItem> {
+        val unwatched = items.filter { !it.isViewed }
+        val watched = items.filter { it.isViewed }
+
+        return if (unwatched.isNotEmpty()) {
+            // Unwatched: newest first, Watched: oldest first (reverse chronological)
+            val sortedUnwatched = unwatched.sortedByDescending { it.sentTimestamp }
+            val sortedWatched = watched.sortedBy { it.sentTimestamp }
+            sortedUnwatched + sortedWatched
+        } else {
+            // All watched: newest first
+            watched.sortedByDescending { it.sentTimestamp }
+        }
+    }
+
+    /**
      * Refreshes the cached videos list, re-sorts, and recalculates unwatched count.
      */
     fun refreshCachedVideos() {
@@ -365,14 +393,16 @@ class ChatReelsDelegate @Inject constructor(
                 !video.viewedInReels && video.sentTimestamp > initialSyncCompleteTimestamp
             }
 
-            // Combine cached social media and attachment items, then sort by timestamp
+            // Combine cached social media and attachment items
             val cachedReelItems = sortAndMapVideos(cachedVideos)
             val allItems = (cachedReelItems + attachmentItems + pendingItems)
-                .sortedByDescending { it.sentTimestamp }
+
+            // Sort based on whether there are unwatched items
+            val sortedItems = sortReelsForDisplay(allItems)
 
             _state.value = _state.value.copy(
                 cachedVideos = cachedVideos,
-                reelItems = allItems,
+                reelItems = sortedItems,
                 unwatchedCount = unwatchedCount
             )
         }
@@ -381,34 +411,51 @@ class ChatReelsDelegate @Inject constructor(
     /**
      * Marks a video as viewed in the Reels feed.
      * Called when user spends time on a video.
+     * Handles both social media videos (cached) and video attachments.
      *
      * NOTE: We don't refresh/re-sort here to avoid changing the list order mid-viewing.
      * The sort will be applied next time the Reels feed is opened.
      */
     fun markVideoAsViewed(originalUrl: String) {
-        cacheManager.markVideoAsViewed(originalUrl)
-
         // Update the viewed state in-place without re-sorting
         val currentItems = _state.value.reelItems.toMutableList()
-        val index = currentItems.indexOfFirst { it.originalUrl == originalUrl }
-        if (index >= 0 && currentItems[index].isCached) {
-            val item = currentItems[index]
-            val updatedVideo = item.cachedVideo?.copy(viewedInReels = true)
-            if (updatedVideo != null) {
-                currentItems[index] = item.copy(cachedVideo = updatedVideo)
+        val index = currentItems.indexOfFirst { it.originalUrl == originalUrl || it.attachmentVideo?.guid == originalUrl }
+        if (index < 0) return
 
-                // Recalculate unwatched count
-                val unwatchedCount = currentItems.count { reel ->
-                    reel.isCached && !reel.isViewed &&
-                    reel.sentTimestamp > initialSyncCompleteTimestamp
+        val item = currentItems[index]
+
+        when {
+            // Social media video (cached)
+            item.isCached -> {
+                cacheManager.markVideoAsViewed(originalUrl)
+                val updatedVideo = item.cachedVideo?.copy(viewedInReels = true)
+                if (updatedVideo != null) {
+                    currentItems[index] = item.copy(cachedVideo = updatedVideo)
                 }
-
-                _state.value = _state.value.copy(
-                    reelItems = currentItems,
-                    unwatchedCount = unwatchedCount
-                )
+            }
+            // Video attachment
+            item.isAttachment -> {
+                val attachmentGuid = item.attachmentVideo?.guid ?: return
+                scope.launch {
+                    attachmentDao.markViewedInReels(attachmentGuid)
+                }
+                val updatedAttachment = item.attachmentVideo?.copy(viewedInReels = true)
+                if (updatedAttachment != null) {
+                    currentItems[index] = item.copy(attachmentVideo = updatedAttachment)
+                }
             }
         }
+
+        // Recalculate unwatched count (social media only for badge)
+        val unwatchedCount = currentItems.count { reel ->
+            reel.isCached && !reel.isViewed &&
+            reel.sentTimestamp > initialSyncCompleteTimestamp
+        }
+
+        _state.value = _state.value.copy(
+            reelItems = currentItems,
+            unwatchedCount = unwatchedCount
+        )
     }
 
     /**

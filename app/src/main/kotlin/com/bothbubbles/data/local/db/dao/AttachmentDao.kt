@@ -374,6 +374,14 @@ interface AttachmentDao {
     @Query("SELECT * FROM attachments WHERE transfer_state = 'DOWNLOADING'")
     suspend fun getDownloadingAttachments(): List<AttachmentEntity>
 
+    // ===== Reels Feed =====
+
+    /**
+     * Mark a video attachment as viewed in the Reels feed.
+     */
+    @Query("UPDATE attachments SET viewed_in_reels = 1 WHERE guid = :guid")
+    suspend fun markViewedInReels(guid: String)
+
     // ===== Cleanup =====
 
     /**

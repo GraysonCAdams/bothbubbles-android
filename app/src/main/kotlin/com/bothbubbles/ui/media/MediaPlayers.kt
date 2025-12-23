@@ -63,7 +63,7 @@ internal fun ZoomableImage(
                         // Handle zoom - anchor to pinch centroid so it feels natural
                         if (zoom != 1f) {
                             val oldScale = scale
-                            val newScale = (scale * zoom).coerceIn(0.5f, 5f)
+                            val newScale = (scale * zoom).coerceIn(1f, 5f)
 
                             if (newScale <= 1f) {
                                 // Reset when zoomed out to 1x or below

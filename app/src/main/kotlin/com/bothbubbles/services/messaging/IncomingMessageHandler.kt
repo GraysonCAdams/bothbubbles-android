@@ -158,8 +158,9 @@ class IncomingMessageHandler @Inject constructor(
         }
 
         // Background download social media videos if enabled
-        // Process both incoming and outgoing messages that contain text
-        if (!messageText.isNullOrBlank()) {
+        // Only process non-reaction messages to avoid caching with wrong sender info
+        // Reactions quote the URL but the reactor isn't the original sender
+        if (!messageText.isNullOrBlank() && messageDto.associatedMessageType == null) {
             triggerSocialMediaBackgroundDownload(
                 messageGuid = message.guid,
                 chatGuid = chatGuid,

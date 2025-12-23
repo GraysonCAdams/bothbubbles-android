@@ -87,7 +87,7 @@ import com.bothbubbles.core.model.entity.Life360MemberEntity
         ContactCalendarAssociationEntity::class,
         SocialMediaLinkEntity::class
     ],
-    version = 57,
+    version = 58,
     exportSchema = true
 )
 abstract class BothBubblesDatabase : RoomDatabase() {

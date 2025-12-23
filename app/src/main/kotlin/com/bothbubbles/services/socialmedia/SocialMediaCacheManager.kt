@@ -68,6 +68,9 @@ interface SocialMediaCacher {
     /** Gets cached videos for a specific chat, with viewed status populated. */
     suspend fun getCachedVideosForChat(chatGuid: String): List<CachedVideo>
 
+    /** Removes duplicate cache entries for the same video. Returns count removed. */
+    suspend fun deduplicateCache(): Int
+
     /** Marks a video as viewed in the Reels feed. */
     fun markVideoAsViewed(originalUrl: String)
 
@@ -779,8 +782,76 @@ class SocialMediaCacheManager @Inject constructor(
     }
 
     private fun hashUrl(url: String): String {
+        // Normalize URL before hashing to prevent duplicates from query param variations
+        val normalizedUrl = normalizeUrl(url)
         val md = MessageDigest.getInstance("SHA-256")
-        val digest = md.digest(url.toByteArray())
+        val digest = md.digest(normalizedUrl.toByteArray())
         return digest.joinToString("") { "%02x".format(it) }.take(32)
+    }
+
+    /**
+     * Normalize URL by stripping query parameters and cleaning up trailing junk.
+     * This ensures the same video always gets the same hash regardless of tracking params.
+     *
+     * Example:
+     * - https://www.instagram.com/reel/DSleht5E4HE/?igsh=MTZ0ejBzdjlrNjM3Mg==
+     * - https://www.instagram.com/reel/DSleht5E4HE/?igsh=abc123
+     * Both normalize to: https://www.instagram.com/reel/DSleht5E4HE
+     */
+    private fun normalizeUrl(url: String): String {
+        return try {
+            val cleanUrl = url.replace("\"", "").replace("'", "")
+            val uri = android.net.Uri.parse(cleanUrl)
+            val pathOnly = uri.path?.trimEnd('/') ?: ""
+            "${uri.scheme}://${uri.host}$pathOnly"
+        } catch (e: Exception) {
+            // Fallback: strip query params
+            url.substringBefore("?").trimEnd('/')
+        }
+    }
+
+    /**
+     * Remove duplicate cache entries for the same video.
+     * Keeps the entry with the most complete sender info.
+     * Returns the number of duplicates removed.
+     */
+    override suspend fun deduplicateCache(): Int = withContext(ioDispatcher) {
+        try {
+            val allVideos = videoMetadataCache.values.toList()
+            val videosByNormalizedUrl = allVideos.groupBy { normalizeUrl(it.originalUrl) }
+
+            var removedCount = 0
+            for ((normalizedUrl, videos) in videosByNormalizedUrl) {
+                if (videos.size > 1) {
+                    // Keep the one with the best metadata (has sender name and address)
+                    val sorted = videos.sortedWith(compareByDescending<CachedVideo> {
+                        !it.senderName.isNullOrBlank() && !it.senderAddress.isNullOrBlank()
+                    }.thenByDescending {
+                        !it.senderName.isNullOrBlank()
+                    }.thenByDescending {
+                        it.cachedAt
+                    })
+
+                    val keep = sorted.first()
+                    val remove = sorted.drop(1)
+
+                    for (video in remove) {
+                        val oldHash = videoMetadataCache.entries.find { it.value == video }?.key
+                        if (oldHash != null) {
+                            videoMetadataCache.remove(oldHash)
+                            removePersistedMetadata(oldHash)
+                            removedCount++
+                            Timber.d("[SocialMediaCache] Removed duplicate for ${normalizedUrl.takeLast(30)}")
+                        }
+                    }
+                }
+            }
+
+            Timber.i("[SocialMediaCache] Deduplicated cache: removed $removedCount duplicates")
+            removedCount
+        } catch (e: Exception) {
+            Timber.e(e, "[SocialMediaCache] Failed to deduplicate cache")
+            0
+        }
     }
 }

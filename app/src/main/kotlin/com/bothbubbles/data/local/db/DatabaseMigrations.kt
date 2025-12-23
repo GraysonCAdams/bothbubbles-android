@@ -1605,6 +1605,23 @@ object DatabaseMigrations {
     }
 
     /**
+     * Migration 57→58: Add viewed_in_reels column to attachments table
+     *
+     * This column tracks whether video attachments have been viewed in the Reels feed,
+     * enabling consistent watched/unwatched state tracking for both social media videos
+     * and regular video attachments.
+     */
+    val MIGRATION_57_58 = object : Migration(57, 58) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            Timber.i("Starting migration 57→58: Add viewed_in_reels to attachments")
+
+            db.execSQL("ALTER TABLE attachments ADD COLUMN viewed_in_reels INTEGER NOT NULL DEFAULT 0")
+
+            Timber.i("Migration 57→58 complete: Added viewed_in_reels column to attachments")
+        }
+    }
+
+    /**
      * List of all migrations for use with databaseBuilder.
      *
      * IMPORTANT: Always add new migrations to this array!
@@ -1666,6 +1683,7 @@ object DatabaseMigrations {
         MIGRATION_53_54,
         MIGRATION_54_55,
         MIGRATION_55_56,
-        MIGRATION_56_57
+        MIGRATION_56_57,
+        MIGRATION_57_58
     )
 }

@@ -90,6 +90,9 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
@@ -120,6 +123,7 @@ import java.util.Locale
 fun ReelsFeedScreen(
     reels: List<ReelItem>,
     initialIndex: Int = 0,
+    initialUnwatchedOnly: Boolean = false,
     onClose: () -> Unit,
     onTapback: (messageGuid: String, url: String, tapback: ReelsTapback) -> Unit,
     onVideoViewed: (originalUrl: String) -> Unit = {},
@@ -129,8 +133,8 @@ fun ReelsFeedScreen(
 ) {
     val context = LocalContext.current
 
-    // Unwatched only filter toggle (default off)
-    var unwatchedOnly by remember { mutableStateOf(false) }
+    // Unwatched only filter - set from initial value (no toggle inside feed)
+    val unwatchedOnly = initialUnwatchedOnly
 
     // Filter reels based on toggle
     val filteredReels = remember(reels, unwatchedOnly) {
@@ -168,12 +172,6 @@ fun ReelsFeedScreen(
                 )
                 Spacer(modifier = Modifier.height(24.dp))
                 FilledTonalButton(
-                    onClick = { unwatchedOnly = false }
-                ) {
-                    Text("Show all videos")
-                }
-                Spacer(modifier = Modifier.height(12.dp))
-                OutlinedButton(
                     onClick = onClose
                 ) {
                     Text("Close")
@@ -195,16 +193,6 @@ fun ReelsFeedScreen(
                     modifier = Modifier.size(28.dp)
                 )
             }
-
-            // Toggle button (still visible)
-            UnwatchedOnlyToggle(
-                isEnabled = unwatchedOnly,
-                onToggle = { unwatchedOnly = it },
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .windowInsetsPadding(WindowInsets.statusBars)
-                    .padding(top = 16.dp)
-            )
         }
         return
     }
@@ -249,15 +237,62 @@ fun ReelsFeedScreen(
         return
     }
 
-    // Track viewed status when settling on a page
+    // Hold-to-hide UI state - lifted to parent so all UI elements can fade together
+    var isHoldingOnVideo by remember { mutableStateOf(false) }
+    val uiAlpha by animateFloatAsState(
+        targetValue = if (isHoldingOnVideo) 0f else 1f,
+        animationSpec = tween(durationMillis = 150),
+        label = "uiAlpha"
+    )
+
+    // Snackbar for "You're all caught up!" toast
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+
+    // Track if we've already shown the "caught up" toast this session
+    var hasShownCaughtUpToast by remember { mutableStateOf(false) }
+
+    // Detect transition from last unwatched to watched video
+    // Reels are sorted: unwatched first (by time desc), then watched (by time desc)
+    // So when we move from an unwatched to a watched reel, we've passed the last unwatched
+    LaunchedEffect(pagerState.currentPage, filteredReels) {
+        // Only show this in "All reels" mode (not unwatched only)
+        if (unwatchedOnly || hasShownCaughtUpToast) return@LaunchedEffect
+
+        val currentPage = pagerState.currentPage
+        val previousPage = currentPage - 1 // We're swiping down (next videos are higher indices)
+
+        // Check if we came from an unwatched video and landed on a watched one
+        val previousReel = filteredReels.getOrNull(previousPage)
+        val currentReel = filteredReels.getOrNull(currentPage)
+
+        if (previousReel != null && currentReel != null) {
+            // If previous was unwatched and current is watched, we just passed the boundary
+            // Since unwatched are sorted first, this means we've caught up on all unwatched
+            if (!previousReel.isViewed && currentReel.isViewed) {
+                hasShownCaughtUpToast = true
+                scope.launch {
+                    snackbarHostState.showSnackbar("You're all caught up!")
+                }
+            }
+        }
+    }
+
+    // Track viewed status when settling on a page (for both social media and attachment videos)
     LaunchedEffect(pagerState.currentPage, filteredReels) {
         val currentReel = filteredReels.getOrNull(pagerState.currentPage)
-        if (currentReel != null && currentReel.isCached && !currentReel.isViewed) {
+        if (currentReel != null && currentReel.isReadyToPlay && !currentReel.isViewed) {
             // Wait 2 seconds before marking as viewed
             delay(2000)
             // Only mark if still on same page
             if (pagerState.currentPage == filteredReels.indexOf(currentReel)) {
-                onVideoViewed(currentReel.originalUrl)
+                // Pass the appropriate identifier: originalUrl for social media, guid for attachments
+                val identifier = if (currentReel.isAttachment) {
+                    currentReel.attachmentVideo?.guid ?: return@LaunchedEffect
+                } else {
+                    currentReel.originalUrl
+                }
+                onVideoViewed(identifier)
             }
         }
     }
@@ -283,10 +318,13 @@ fun ReelsFeedScreen(
             modifier = Modifier.fillMaxSize()
         ) { page ->
             val reel = filteredReels[page]
-            if (reel.isCached) {
+            if (reel.isReadyToPlay) {
                 ReelPage(
                     reel = reel,
                     isCurrentPage = page == pagerState.currentPage,
+                    uiAlpha = uiAlpha,
+                    onHoldStart = { isHoldingOnVideo = true },
+                    onHoldEnd = { isHoldingOnVideo = false },
                     onTapback = { tapback ->
                         onTapback(reel.messageGuid, reel.originalUrl, tapback)
                     },
@@ -317,13 +355,14 @@ fun ReelsFeedScreen(
             }
         }
 
-        // Close button - top left
+        // Close button - top left (fades with hold gesture)
         IconButton(
             onClick = onClose,
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .windowInsetsPadding(WindowInsets.statusBars)
                 .padding(16.dp)
+                .alpha(uiAlpha)
                 .background(Color.Black.copy(alpha = 0.3f), CircleShape)
         ) {
             Icon(
@@ -334,17 +373,7 @@ fun ReelsFeedScreen(
             )
         }
 
-        // Unwatched only toggle - top center
-        UnwatchedOnlyToggle(
-            isEnabled = unwatchedOnly,
-            onToggle = { unwatchedOnly = it },
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .windowInsetsPadding(WindowInsets.statusBars)
-                .padding(top = 16.dp)
-        )
-
-        // Share button - top right
+        // Share button - top right (fades with hold gesture)
         IconButton(
             onClick = {
                 val currentReel = filteredReels.getOrNull(pagerState.currentPage)
@@ -360,6 +389,7 @@ fun ReelsFeedScreen(
                 .align(Alignment.TopEnd)
                 .windowInsetsPadding(WindowInsets.statusBars)
                 .padding(16.dp)
+                .alpha(uiAlpha)
                 .background(Color.Black.copy(alpha = 0.3f), CircleShape)
         ) {
             Icon(
@@ -369,6 +399,22 @@ fun ReelsFeedScreen(
                 modifier = Modifier.size(24.dp)
             )
         }
+
+        // Snackbar host for "You're all caught up!" toast
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .windowInsetsPadding(WindowInsets.systemBars)
+                .padding(bottom = 32.dp)
+        ) { data ->
+            Snackbar(
+                snackbarData = data,
+                containerColor = Color.White,
+                contentColor = Color.Black,
+                shape = RoundedCornerShape(24.dp)
+            )
+        }
     }
 }
 
@@ -376,6 +422,9 @@ fun ReelsFeedScreen(
 private fun ReelPage(
     reel: ReelItem,
     isCurrentPage: Boolean,
+    uiAlpha: Float,
+    onHoldStart: () -> Unit,
+    onHoldEnd: () -> Unit,
     onTapback: (ReelsTapback) -> Unit,
     onOpenInBrowser: () -> Unit,
     onShare: () -> Unit,
@@ -388,13 +437,8 @@ private fun ReelPage(
     var isPaused by remember { mutableStateOf(false) }
     var showPauseIndicator by remember { mutableStateOf(false) }
 
-    // Hold-to-hide UI (TikTok-style) - hides all overlays when holding on video
-    var isHoldingOnVideo by remember { mutableStateOf(false) }
-    val uiAlpha by animateFloatAsState(
-        targetValue = if (isHoldingOnVideo) 0f else 1f,
-        animationSpec = tween(durationMillis = 150),
-        label = "uiAlpha"
-    )
+    // Track if currently holding (for internal gesture handling)
+    var isHolding by remember { mutableStateOf(false) }
 
     // Video progress tracking
     var videoProgress by remember { mutableFloatStateOf(0f) }
@@ -406,11 +450,11 @@ private fun ReelPage(
     var tapbackAcknowledgement by remember { mutableStateOf<ReelsTapback?>(null) }
     val tapbackScale = remember { Animatable(0f) }
 
-    // Create ExoPlayer (cachedVideo is guaranteed non-null here)
-    val cachedVideo = reel.cachedVideo!!
+    // Create ExoPlayer (reel.localPath is guaranteed non-null for ready-to-play items)
+    val localPath = reel.localPath!!
     val exoPlayer = remember {
         ExoPlayer.Builder(context).build().apply {
-            setMediaItem(MediaItem.fromUri(cachedVideo.localPath))
+            setMediaItem(MediaItem.fromUri(localPath))
             prepare()
             repeatMode = Player.REPEAT_MODE_ONE
         }
@@ -475,7 +519,8 @@ private fun ReelPage(
                         // Only trigger hold-to-hide if not scrubbing
                         if (!isScrubbing) {
                             view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-                            isHoldingOnVideo = true
+                            isHolding = true
+                            onHoldStart()
                         }
                     },
                     onPress = { offset ->
@@ -484,8 +529,9 @@ private fun ReelPage(
                             awaitRelease()
                         } finally {
                             // Always release the hold when finger is lifted
-                            if (isHoldingOnVideo) {
-                                isHoldingOnVideo = false
+                            if (isHolding) {
+                                isHolding = false
+                                onHoldEnd()
                             }
                         }
                     },
@@ -605,17 +651,16 @@ private fun ReelPage(
         )
 
         // Sender info badge - bottom left (above scrubber) - fades with hold gesture
-        val platform = reel.platform ?: return@Box
         SenderInfoBadge(
             senderName = reel.senderName,
             senderAddress = reel.senderAddress,
             avatarPath = reel.avatarPath,
-            platform = platform,
+            platform = reel.platform,
             timestamp = reel.sentTimestamp,
             currentTapback = reel.currentTapback,
             reactions = reel.reactions,
             replyCount = reel.replyCount,
-            onOpenInBrowser = onOpenInBrowser,
+            onOpenInBrowser = if (reel.isCached) onOpenInBrowser else null,
             onReplyClick = onReplyClick,
             modifier = Modifier
                 .align(Alignment.BottomStart)
@@ -1015,12 +1060,12 @@ private fun SenderInfoBadge(
     senderName: String?,
     senderAddress: String?,
     avatarPath: String?,
-    platform: SocialMediaPlatform,
+    platform: SocialMediaPlatform?,
     timestamp: Long,
     currentTapback: ReelsTapback?,
     reactions: List<ReactionUiModel>,
     replyCount: Int,
-    onOpenInBrowser: () -> Unit,
+    onOpenInBrowser: (() -> Unit)?,
     onReplyClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -1059,10 +1104,10 @@ private fun SenderInfoBadge(
                         overflow = TextOverflow.Ellipsis
                     )
 
-                    // Platform and time
+                    // Platform/source and time
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            text = platform.displayName,
+                            text = platform?.displayName ?: "Video",
                             style = MaterialTheme.typography.bodySmall,
                             color = Color.White.copy(alpha = 0.8f)
                         )
@@ -1089,19 +1134,21 @@ private fun SenderInfoBadge(
                     }
                 }
 
-                // Open in browser button
-                IconButton(
-                    onClick = onOpenInBrowser,
-                    modifier = Modifier
-                        .size(36.dp)
-                        .background(Color.White.copy(alpha = 0.2f), CircleShape)
-                ) {
-                    Icon(
-                        Icons.Default.OpenInNew,
-                        contentDescription = "Open in browser",
-                        tint = Color.White,
-                        modifier = Modifier.size(18.dp)
-                    )
+                // Open in browser button (only for social media videos)
+                if (onOpenInBrowser != null) {
+                    IconButton(
+                        onClick = onOpenInBrowser,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .background(Color.White.copy(alpha = 0.2f), CircleShape)
+                    ) {
+                        Icon(
+                            Icons.Default.OpenInNew,
+                            contentDescription = "Open in browser",
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
             }
 
@@ -1289,37 +1336,4 @@ private fun formatRelativeTime(timestamp: Long): String {
     }
 }
 
-/**
- * Toggle switch for filtering to unwatched videos only.
- * Has a semi-transparent background for visibility over video content.
- */
-@Composable
-private fun UnwatchedOnlyToggle(
-    isEnabled: Boolean,
-    onToggle: (Boolean) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        shape = RoundedCornerShape(24.dp),
-        color = Color.Black.copy(alpha = 0.5f),
-        modifier = modifier
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp)
-        ) {
-            Text(
-                text = "Unwatched",
-                style = MaterialTheme.typography.labelMedium,
-                color = Color.White
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            androidx.compose.material3.Switch(
-                checked = isEnabled,
-                onCheckedChange = onToggle,
-                modifier = Modifier.height(24.dp)
-            )
-        }
-    }
-}
 

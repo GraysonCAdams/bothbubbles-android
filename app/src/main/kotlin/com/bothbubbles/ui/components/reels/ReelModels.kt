@@ -216,7 +216,8 @@ data class ReelItem(
             chatGuid: String? = null,
             senderName: String? = null,
             senderAddress: String? = null,
-            sentTimestamp: Long = 0L
+            sentTimestamp: Long = 0L,
+            avatarPath: String? = null
         ): ReelItem {
             return ReelItem(
                 pendingUrl = url,
@@ -225,7 +226,8 @@ data class ReelItem(
                 pendingChatGuid = chatGuid,
                 pendingSenderName = senderName,
                 pendingSenderAddress = senderAddress,
-                pendingSentTimestamp = sentTimestamp
+                pendingSentTimestamp = sentTimestamp,
+                avatarPath = avatarPath
             )
         }
     }
