@@ -64,6 +64,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
@@ -85,6 +86,8 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -98,8 +101,12 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.bothbubbles.services.linkpreview.LinkMetadata
+import com.bothbubbles.services.linkpreview.LinkMetadataResult
+import com.bothbubbles.services.linkpreview.LinkPreviewService
 import com.bothbubbles.services.socialmedia.SocialMediaPlatform
 import com.bothbubbles.ui.components.common.Avatar
+import com.bothbubbles.util.parsing.HtmlEntityDecoder
 import com.bothbubbles.ui.components.message.ReactionsDisplay
 import com.bothbubbles.ui.components.message.ReactionUiModel
 import kotlinx.coroutines.delay
@@ -361,7 +368,7 @@ fun ReelsFeedScreen(
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .windowInsetsPadding(WindowInsets.statusBars)
-                .padding(16.dp)
+                .padding(start = 8.dp, top = 4.dp)
                 .alpha(uiAlpha)
                 .background(Color.Black.copy(alpha = 0.3f), CircleShape)
         ) {
@@ -388,7 +395,7 @@ fun ReelsFeedScreen(
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .windowInsetsPadding(WindowInsets.statusBars)
-                .padding(16.dp)
+                .padding(end = 8.dp, top = 4.dp)
                 .alpha(uiAlpha)
                 .background(Color.Black.copy(alpha = 0.3f), CircleShape)
         ) {
@@ -693,6 +700,7 @@ private fun ReelPage(
 /**
  * Page for a pending (not yet downloaded) reel.
  * Shows download progress or a download button.
+ * For failed downloads, fetches link metadata and displays a rich preview.
  */
 @Composable
 private fun PendingReelPage(
@@ -701,6 +709,7 @@ private fun PendingReelPage(
     onStartDownload: () -> Unit,
     onOpenInBrowser: () -> Unit
 ) {
+    val context = LocalContext.current
     val view = LocalView.current
 
     // Auto-start download when this becomes the current page
@@ -713,24 +722,65 @@ private fun PendingReelPage(
     // Collect download progress if available
     val downloadProgress = reel.downloadProgress?.collectAsState()
 
+    // Fetch link metadata when there's an error (for display in FailedReelCard)
+    var linkMetadata by remember { mutableStateOf<LinkMetadata?>(null) }
+    LaunchedEffect(reel.downloadError, reel.originalUrl) {
+        if (reel.downloadError != null && linkMetadata == null) {
+            // Try to fetch metadata for better display
+            try {
+                val service = LinkPreviewService(context,
+                    com.bothbubbles.data.local.prefs.SettingsDataStore(context))
+                val result = service.fetchMetadata(reel.originalUrl)
+                if (result is LinkMetadataResult.Success) {
+                    linkMetadata = result.metadata
+                }
+            } catch (e: Exception) {
+                // Ignore - fallback will be used
+            }
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black),
         contentAlignment = Alignment.Center
     ) {
-        // Bottom gradient overlay
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(200.dp)
-                .align(Alignment.BottomCenter)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f))
+        // Fullscreen background image for failed state (blurred, dimmed, stretched, cropped-to-fill)
+        if (reel.downloadError != null && linkMetadata?.imageUrl != null) {
+            AsyncImage(
+                model = ImageRequest.Builder(context)
+                    .data(linkMetadata?.imageUrl)
+                    .crossfade(true)
+                    .build(),
+                contentDescription = null,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .blur(radius = 25.dp),
+                contentScale = ContentScale.Crop
+            )
+            // Dim overlay on top of blur
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.5f))
+            )
+        }
+
+        // Bottom gradient overlay (for non-error states)
+        if (reel.downloadError == null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(200.dp)
+                    .align(Alignment.BottomCenter)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f))
+                        )
                     )
-                )
-        )
+            )
+        }
 
         // Center content - download state
         Column(
@@ -739,9 +789,10 @@ private fun PendingReelPage(
         ) {
             when {
                 reel.downloadError != null -> {
-                    // Error state - show link preview card
+                    // Error state - show link preview card with metadata
                     FailedReelCard(
                         reel = reel,
+                        linkMetadata = linkMetadata,
                         onRetry = {
                             view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
                             onStartDownload()
@@ -836,11 +887,13 @@ private fun PendingReelPage(
 
 /**
  * Card displayed when a reel fails to download.
- * Shows a styled preview card with platform info, error message, and options to retry or open externally.
+ * Shows link preview metadata with a dimmed background image, error message,
+ * and options to retry or open in external browser.
  */
 @Composable
 private fun FailedReelCard(
     reel: ReelItem,
+    linkMetadata: LinkMetadata?,
     onRetry: () -> Unit,
     onOpenInBrowser: () -> Unit,
     modifier: Modifier = Modifier
@@ -849,61 +902,98 @@ private fun FailedReelCard(
 
     Card(
         modifier = modifier
-            .widthIn(max = 300.dp)
+            .widthIn(max = 320.dp)
             .padding(horizontal = 24.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.95f)
         ),
-        shape = RoundedCornerShape(16.dp)
+        shape = RoundedCornerShape(20.dp)
     ) {
         Column {
-            // Platform thumbnail header
+            // Header with background image or platform gradient
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(160.dp)
-                    .background(
-                        when (reel.platform) {
-                            SocialMediaPlatform.INSTAGRAM -> Color(0xFFE1306C).copy(alpha = 0.15f)
-                            SocialMediaPlatform.TIKTOK -> Color(0xFF00F2EA).copy(alpha = 0.15f)
-                            null -> MaterialTheme.colorScheme.surfaceVariant
-                        }
-                    ),
+                    .height(180.dp)
+                    .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)),
                 contentAlignment = Alignment.Center
             ) {
+                // Background: either link preview image or platform gradient
+                if (linkMetadata?.imageUrl != null) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(context)
+                            .data(linkMetadata.imageUrl)
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                    // Dimmed overlay
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.5f))
+                    )
+                } else {
+                    // Fallback platform gradient
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                when (reel.platform) {
+                                    SocialMediaPlatform.INSTAGRAM -> Brush.verticalGradient(
+                                        listOf(Color(0xFFF58529), Color(0xFFDD2A7B), Color(0xFF8134AF))
+                                    )
+                                    SocialMediaPlatform.TIKTOK -> Brush.verticalGradient(
+                                        listOf(Color(0xFF00F2EA), Color(0xFF000000), Color(0xFFFF0050))
+                                    )
+                                    null -> Brush.verticalGradient(
+                                        listOf(
+                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+                                            MaterialTheme.colorScheme.surfaceVariant
+                                        )
+                                    )
+                                }
+                            )
+                    )
+                }
+
+                // Center content: play icon and error badge
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    // Platform-styled play icon
+                    // Platform-styled play icon with shadow
                     Icon(
                         Icons.Default.PlayCircle,
                         contentDescription = null,
-                        modifier = Modifier.size(64.dp),
-                        tint = when (reel.platform) {
-                            SocialMediaPlatform.INSTAGRAM -> Color(0xFFE1306C)
-                            SocialMediaPlatform.TIKTOK -> Color(0xFF00F2EA)
-                            null -> MaterialTheme.colorScheme.primary
-                        }
+                        modifier = Modifier.size(72.dp),
+                        tint = Color.White
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    // Error indicator
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
+                    Spacer(modifier = Modifier.height(12.dp))
+                    // Error badge
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = Color.Black.copy(alpha = 0.7f)
                     ) {
-                        Icon(
-                            Icons.Default.CloudOff,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.error
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "Download failed",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.error
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.CloudOff,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = Color(0xFFFF6B6B)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Download failed",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White
+                            )
+                        }
                     }
                 }
             }
@@ -912,37 +1002,45 @@ private fun FailedReelCard(
             Column(
                 modifier = Modifier.padding(16.dp)
             ) {
-                // Platform name
+                // Site name / platform
                 Text(
-                    text = reel.platform?.displayName?.uppercase() ?: "VIDEO",
+                    text = linkMetadata?.siteName
+                        ?: reel.platform?.displayName?.uppercase()
+                        ?: "VIDEO",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold
                 )
 
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(6.dp))
 
-                // Title - extract from URL if possible
-                val title = remember(reel.originalUrl) {
-                    when (reel.platform) {
+                // Title from metadata or fallback (decode HTML entities)
+                val title = HtmlEntityDecoder.decode(linkMetadata?.title)
+                    ?: when (reel.platform) {
                         SocialMediaPlatform.INSTAGRAM -> "Instagram Reel"
                         SocialMediaPlatform.TIKTOK -> "TikTok Video"
                         null -> "Video"
                     }
-                }
                 Text(
                     text = title,
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
 
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(6.dp))
 
-                // Description/context
+                // Description from metadata or fallback (decode HTML entities)
+                val description = HtmlEntityDecoder.decode(linkMetadata?.description)
+                    ?: "Couldn't download this video. Tap Open to view in your browser."
                 Text(
-                    text = "Couldn't download this video. You can try again or open it in your browser.",
+                    text = description,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -950,18 +1048,30 @@ private fun FailedReelCard(
                 // Action buttons
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     OutlinedButton(
                         onClick = onRetry,
                         modifier = Modifier.weight(1f)
                     ) {
+                        Icon(
+                            Icons.Default.Refresh,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text("Retry")
                     }
-                    FilledTonalButton(
+                    Button(
                         onClick = onOpenInBrowser,
                         modifier = Modifier.weight(1f)
                     ) {
+                        Icon(
+                            Icons.Default.OpenInNew,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text("Open")
                     }
                 }

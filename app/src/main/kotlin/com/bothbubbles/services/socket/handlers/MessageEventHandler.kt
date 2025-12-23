@@ -169,10 +169,15 @@ class MessageEventHandler @Inject constructor(
             }
 
             // Fetch link preview data if message contains a URL (skip for invisible ink)
+            // Uses getLinkPreviewForNotification to trigger notification updates when preview completes
             val (linkTitle, linkDomain) = if (!isInvisibleInk && (messageText.contains("http://") || messageText.contains("https://"))) {
                 val detectedUrl = UrlParsingUtils.getFirstUrl(messageText)
                 if (detectedUrl != null) {
-                    val preview = linkPreviewRepository.getLinkPreview(detectedUrl.url)
+                    val preview = linkPreviewRepository.getLinkPreviewForNotification(
+                        url = detectedUrl.url,
+                        messageGuid = savedMessage.guid,
+                        chatGuid = event.chatGuid
+                    )
                     val title = preview?.title?.takeIf { it.isNotBlank() }
                     val domain = preview?.domain ?: detectedUrl.domain
                     title to domain

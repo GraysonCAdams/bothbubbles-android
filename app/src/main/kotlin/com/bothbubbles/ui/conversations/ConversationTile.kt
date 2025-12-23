@@ -63,6 +63,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bothbubbles.ui.components.common.Avatar
+import com.bothbubbles.ui.components.common.FlippingMarqueeText
 import com.bothbubbles.ui.components.common.GroupAvatar
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -300,7 +301,7 @@ internal fun GoogleStyleConversationTile(
                     emptyMap()
                 }
 
-                Text(
+                FlippingMarqueeText(
                     text = annotatedText,
                     inlineContent = inlineContent,
                     style = MaterialTheme.typography.bodyMedium.copy(
@@ -308,8 +309,7 @@ internal fun GoogleStyleConversationTile(
                         lineHeight = 18.sp
                     ),
                     color = textColor,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
+                    maxLines = 2
                 )
             }
 

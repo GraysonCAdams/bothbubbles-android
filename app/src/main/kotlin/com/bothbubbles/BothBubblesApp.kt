@@ -24,6 +24,7 @@ import com.bothbubbles.services.developer.ConnectionModeManager
 import com.bothbubbles.services.developer.DeveloperEventLog
 import com.bothbubbles.services.fcm.FirebaseDatabaseService
 import com.bothbubbles.services.notifications.BadgeManager
+import com.bothbubbles.services.notifications.NotificationLinkPreviewUpdater
 import com.bothbubbles.services.notifications.NotificationMediaUpdater
 import com.bothbubbles.services.life360.Life360SyncWorker
 import com.bothbubbles.services.life360.Life360TokenStorage
@@ -121,6 +122,9 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
 
     @Inject
     lateinit var notificationMediaUpdater: NotificationMediaUpdater
+
+    @Inject
+    lateinit var notificationLinkPreviewUpdater: NotificationLinkPreviewUpdater
 
     @Inject
     lateinit var authInterceptor: AuthInterceptor
@@ -234,6 +238,9 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
 
         // Initialize notification media updater for inline image previews
         initializeNotificationMediaUpdater()
+
+        // Initialize notification link preview updater for rich link previews
+        initializeNotificationLinkPreviewUpdater()
 
         // Sync group chats to system contacts for Google Assistant voice commands
         initializeGroupContactSync()
@@ -542,6 +549,16 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
      */
     private fun initializeNotificationMediaUpdater() {
         notificationMediaUpdater.initialize()
+    }
+
+    /**
+     * Initialize notification link preview updater to add rich link previews to notifications.
+     *
+     * When a link preview is fetched after the initial notification is shown,
+     * this updates the notification with the title, domain, and preview image.
+     */
+    private fun initializeNotificationLinkPreviewUpdater() {
+        notificationLinkPreviewUpdater.initialize()
     }
 
     /**

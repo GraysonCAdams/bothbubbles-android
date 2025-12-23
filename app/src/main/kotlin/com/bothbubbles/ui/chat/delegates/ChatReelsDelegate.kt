@@ -127,7 +127,8 @@ class ChatReelsDelegate @Inject constructor(
      * Uses the social_media_links table for correct sender attribution.
      */
     private suspend fun findPendingVideos(cachedVideos: List<CachedVideo>): List<ReelItem> {
-        val cachedUrls = cachedVideos.map { it.originalUrl }.toSet()
+        // Normalize cached URLs for comparison (handles query params and trailing junk)
+        val cachedNormalizedUrls = cachedVideos.map { normalizeUrl(it.originalUrl) }.toSet()
         val pendingItems = mutableListOf<ReelItem>()
 
         try {
@@ -136,8 +137,9 @@ class ChatReelsDelegate @Inject constructor(
             Timber.d("[Reels] Found ${pendingLinks.size} pending social media links in table")
 
             for (link in pendingLinks) {
-                // Skip if already cached (in case is_downloaded flag is out of sync)
-                if (cachedUrls.contains(link.url)) continue
+                // Skip if already cached (compare normalized URLs to handle query param differences)
+                val normalizedLinkUrl = normalizeUrl(link.url)
+                if (cachedNormalizedUrls.contains(normalizedLinkUrl)) continue
                 // Skip if already in pending list (shouldn't happen with unique URLs)
                 if (pendingItems.any { it.originalUrl == link.url }) continue
 
@@ -612,6 +614,23 @@ class ChatReelsDelegate @Inject constructor(
      * Checks if the Reels feed feature is enabled.
      */
     fun isReelsFeedEnabled(): Boolean = _state.value.isEnabled
+
+    /**
+     * Normalize URL by extracting just the base path (without query params or trailing junk).
+     * Used for deduplication when comparing cached URLs with social_media_links entries.
+     */
+    private fun normalizeUrl(url: String): String {
+        return try {
+            // Strip query params and any trailing quotes/junk
+            val cleanUrl = url.replace("\"", "").replace("'", "")
+            val uri = android.net.Uri.parse(cleanUrl)
+            val pathOnly = uri.path?.trimEnd('/') ?: ""
+            "${uri.scheme}://${uri.host}$pathOnly"
+        } catch (e: Exception) {
+            // Fallback: just strip everything after ?
+            url.substringBefore("?").trimEnd('/')
+        }
+    }
 }
 
 /**

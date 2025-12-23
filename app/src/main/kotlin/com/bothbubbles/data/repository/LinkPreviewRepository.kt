@@ -14,6 +14,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.launch
 import java.security.MessageDigest
@@ -34,6 +37,17 @@ import javax.inject.Singleton
  * - Background fetching with coroutines
  * - Automatic cache eviction
  */
+/**
+ * Emitted when a link preview fetch completes successfully.
+ * Used by NotificationLinkPreviewUpdater to update notifications with rich preview data.
+ */
+data class LinkPreviewCompletion(
+    val url: String,
+    val messageGuid: String,
+    val chatGuid: String,
+    val preview: LinkPreviewEntity
+)
+
 @Singleton
 class LinkPreviewRepository @Inject constructor(
     private val linkPreviewDao: LinkPreviewDao,
@@ -46,6 +60,10 @@ class LinkPreviewRepository @Inject constructor(
     }
 
     private val repositoryScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    // Completion signal for notification updates
+    private val _previewCompletions = MutableSharedFlow<LinkPreviewCompletion>(extraBufferCapacity = 16)
+    val previewCompletions: SharedFlow<LinkPreviewCompletion> = _previewCompletions.asSharedFlow()
 
     // In-memory LRU cache
     private val memoryCache = object : LruCache<String, LinkPreviewEntity>(MEMORY_CACHE_SIZE) {
@@ -171,6 +189,67 @@ class LinkPreviewRepository @Inject constructor(
     }
 
     /**
+     * Gets a link preview for a URL, with message context for notification updates.
+     * When the preview finishes fetching, emits to [previewCompletions] so notifications
+     * can be updated with the rich preview data.
+     *
+     * @param url The URL to fetch preview for
+     * @param messageGuid The message GUID (for notification update association)
+     * @param chatGuid The chat GUID (for notification update association)
+     */
+    suspend fun getLinkPreviewForNotification(
+        url: String,
+        messageGuid: String,
+        chatGuid: String
+    ): LinkPreviewEntity? {
+        val urlHash = hashUrl(url)
+
+        // Check memory cache first
+        memoryCache.get(urlHash)?.let { cached ->
+            if (cached.fetchStatus == LinkPreviewFetchStatus.SUCCESS.name) {
+                // Already have successful preview, emit immediately
+                _previewCompletions.tryEmit(
+                    LinkPreviewCompletion(url, messageGuid, chatGuid, cached)
+                )
+                return cached
+            }
+        }
+
+        // Check database
+        linkPreviewDao.getByUrlHash(urlHash)?.let { dbEntry ->
+            memoryCache.put(urlHash, dbEntry)
+
+            if (dbEntry.fetchStatus == LinkPreviewFetchStatus.SUCCESS.name) {
+                // Already have successful preview, emit immediately
+                _previewCompletions.tryEmit(
+                    LinkPreviewCompletion(url, messageGuid, chatGuid, dbEntry)
+                )
+                return dbEntry
+            }
+
+            // Pending or failed - trigger fetch with message context
+            if (dbEntry.fetchStatus == LinkPreviewFetchStatus.PENDING.name ||
+                (dbEntry.fetchStatus == LinkPreviewFetchStatus.FAILED.name &&
+                    System.currentTimeMillis() - dbEntry.lastAccessed > RETRY_DELAY_MS)
+            ) {
+                fetchAndUpdateWithContext(url, urlHash, messageGuid, chatGuid)
+            }
+            return dbEntry
+        }
+
+        // Not cached - create pending entry and fetch
+        val domain = UrlParsingUtils.extractDomain(url)
+        val pendingEntry = LinkPreviewEntity.createPending(url, urlHash, domain)
+
+        linkPreviewDao.insert(pendingEntry)
+        memoryCache.put(urlHash, pendingEntry)
+
+        // Start fetch with message context
+        fetchAndUpdateWithContext(url, urlHash, messageGuid, chatGuid)
+        return pendingEntry
+    }
+
+    /**
      * Forces a refresh of a link preview (clears cache and re-fetches)
      */
     suspend fun refreshLinkPreview(url: String): LinkPreviewEntity? {
@@ -245,6 +324,93 @@ class LinkPreviewRepository @Inject constructor(
                         linkPreviewDao.insert(entry)
                         memoryCache.put(urlHash, entry)
                         Timber.d("Successfully fetched preview for: $url")
+                        entry
+                    }
+
+                    is LinkMetadataResult.Error -> {
+                        Timber.w("Failed to fetch preview for $url: ${result.message}")
+                        linkPreviewDao.updateFetchStatus(urlHash, LinkPreviewFetchStatus.FAILED.name)
+                        null
+                    }
+
+                    is LinkMetadataResult.NoPreview -> {
+                        Timber.d("No preview available for: $url")
+                        linkPreviewDao.updateFetchStatus(urlHash, LinkPreviewFetchStatus.NO_PREVIEW.name)
+                        null
+                    }
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Error fetching preview for $url")
+                linkPreviewDao.updateFetchStatus(urlHash, LinkPreviewFetchStatus.FAILED.name)
+                null
+            } finally {
+                inFlightRequests.remove(urlHash)
+            }
+        }
+
+        inFlightRequests[urlHash] = deferred
+    }
+
+    /**
+     * Fetches metadata from network and updates cache, with message context for notifications.
+     * Emits to [previewCompletions] when fetch succeeds.
+     */
+    private fun fetchAndUpdateWithContext(
+        url: String,
+        urlHash: String,
+        messageGuid: String,
+        chatGuid: String
+    ) {
+        // Check for existing in-flight request
+        if (inFlightRequests.containsKey(urlHash)) {
+            // Already fetching - we need to wait and emit when done
+            repositoryScope.launch {
+                inFlightRequests[urlHash]?.await()?.let { entry ->
+                    if (entry.fetchStatus == LinkPreviewFetchStatus.SUCCESS.name) {
+                        _previewCompletions.tryEmit(
+                            LinkPreviewCompletion(url, messageGuid, chatGuid, entry)
+                        )
+                    }
+                }
+            }
+            return
+        }
+
+        val deferred = repositoryScope.async {
+            try {
+                linkPreviewDao.updateFetchStatus(urlHash, LinkPreviewFetchStatus.LOADING.name)
+
+                when (val result = linkPreviewService.fetchMetadata(url)) {
+                    is LinkMetadataResult.Success -> {
+                        val metadata = result.metadata
+                        val domain = UrlParsingUtils.extractDomain(url)
+
+                        val entry = LinkPreviewEntity(
+                            url = url,
+                            urlHash = urlHash,
+                            domain = domain,
+                            title = metadata.title,
+                            description = metadata.description,
+                            imageUrl = metadata.imageUrl,
+                            faviconUrl = metadata.faviconUrl,
+                            siteName = metadata.siteName,
+                            contentType = metadata.contentType,
+                            embedHtml = metadata.embedHtml,
+                            authorName = metadata.authorName,
+                            authorUrl = metadata.authorUrl,
+                            fetchStatus = LinkPreviewFetchStatus.SUCCESS.name,
+                            lastAccessed = System.currentTimeMillis()
+                        )
+
+                        linkPreviewDao.insert(entry)
+                        memoryCache.put(urlHash, entry)
+                        Timber.d("Successfully fetched preview for notification: $url")
+
+                        // Emit completion for notification update
+                        _previewCompletions.tryEmit(
+                            LinkPreviewCompletion(url, messageGuid, chatGuid, entry)
+                        )
+
                         entry
                     }
 
