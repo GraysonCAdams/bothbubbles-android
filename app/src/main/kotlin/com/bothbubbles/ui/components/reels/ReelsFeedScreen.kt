@@ -60,6 +60,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -115,7 +116,10 @@ import com.bothbubbles.util.HapticUtils
 import com.bothbubbles.util.ThrottledHaptic
 import com.bothbubbles.util.rememberThrottledHaptic
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
+import timber.log.Timber
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -166,6 +170,34 @@ fun ReelsFeedScreen(
     // Handle back gesture/button to close reels instead of navigating back
     BackHandler(enabled = true) {
         onClose()
+    }
+
+    // Auto-close when swiping up past the last unwatched reel
+    // This gives the user a natural exit gesture after watching all unwatched content
+    var hitEndThreshold by remember { mutableStateOf(false) }
+
+    // Track when we hit the threshold (swipe past end)
+    LaunchedEffect(pagerState, filteredReels.size, unwatchedOnly) {
+        if (!unwatchedOnly || filteredReels.isEmpty()) return@LaunchedEffect
+
+        snapshotFlow {
+            val isOnLastPage = pagerState.currentPage >= filteredReels.size - 1
+            val isSwipingPastEnd = pagerState.currentPageOffsetFraction < -0.2f
+            isOnLastPage && isSwipingPastEnd && pagerState.isScrollInProgress
+        }.collect { triggered ->
+            if (triggered) {
+                hitEndThreshold = true
+            }
+        }
+    }
+
+    // When scroll settles and we hit the threshold, close
+    LaunchedEffect(pagerState.isScrollInProgress, hitEndThreshold, unwatchedOnly) {
+        if (unwatchedOnly && hitEndThreshold && !pagerState.isScrollInProgress) {
+            // Reset and close
+            hitEndThreshold = false
+            onClose()
+        }
     }
 
     // Show "All caught up!" when unwatched only is on but no unwatched videos
@@ -303,6 +335,7 @@ fun ReelsFeedScreen(
     // Mark reel as viewed immediately when displayed (regardless of play status or download state)
     LaunchedEffect(pagerState.currentPage, filteredReels) {
         val currentReel = filteredReels.getOrNull(pagerState.currentPage)
+        Timber.tag("ReelViewed").d("[REEL_DEBUG] Page changed to ${pagerState.currentPage}, reel=${currentReel?.originalUrl?.take(50)}, isViewed=${currentReel?.isViewed}, isAttachment=${currentReel?.isAttachment}, isPending=${currentReel?.isPending}")
         if (currentReel != null && !currentReel.isViewed) {
             // Pass the appropriate identifier: originalUrl for social media, guid for attachments
             val identifier = if (currentReel.isAttachment) {
@@ -310,7 +343,10 @@ fun ReelsFeedScreen(
             } else {
                 currentReel.originalUrl
             }
+            Timber.tag("ReelViewed").d("[REEL_DEBUG] Marking reel as viewed: identifier=$identifier")
             onVideoViewed(identifier)
+        } else if (currentReel != null) {
+            Timber.tag("ReelViewed").d("[REEL_DEBUG] Reel already viewed, skipping: ${currentReel.originalUrl?.take(50)}")
         }
     }
 
@@ -325,11 +361,11 @@ fun ReelsFeedScreen(
         }
     }
 
-    // Haptic feedback when page settles on a new video
+    // Subtle haptic feedback when page settles on a new video
     var previousPage by remember { mutableStateOf(pagerState.currentPage) }
     LaunchedEffect(pagerState.settledPage) {
         if (pagerState.settledPage != previousPage) {
-            HapticUtils.onConfirm(haptic)
+            HapticUtils.onDragTransition(haptic)
             previousPage = pagerState.settledPage
         }
     }
@@ -695,7 +731,7 @@ private fun ReelPage(
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .windowInsetsPadding(WindowInsets.systemBars)
-                .padding(start = 16.dp, bottom = 24.dp)
+                .padding(start = 16.dp, end = 16.dp, bottom = 24.dp)
                 .alpha(uiAlpha)
         )
 
@@ -902,7 +938,7 @@ private fun PendingReelPage(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
                     .windowInsetsPadding(WindowInsets.systemBars)
-                    .padding(start = 16.dp, bottom = 24.dp)
+                    .padding(start = 16.dp, end = 16.dp, bottom = 24.dp)
             )
         }
     }

@@ -235,13 +235,13 @@ private fun ChatTopBarContent(
                     var showReelsMenu = remember { mutableStateOf(false) }
                     val hasUnwatched = unwatchedReelsCount > 0
 
-                    // Pulse animation for unwatched reels
+                    // Subtle pulse animation for unwatched reels (1.0 to 1.08, never smaller)
                     val infiniteTransition = rememberInfiniteTransition(label = "reels_pulse")
                     val pulseScale by infiniteTransition.animateFloat(
                         initialValue = 1f,
-                        targetValue = if (hasUnwatched) 1.15f else 1f,
+                        targetValue = if (hasUnwatched) 1.08f else 1f,
                         animationSpec = infiniteRepeatable(
-                            animation = tween(800),
+                            animation = tween(1000),
                             repeatMode = RepeatMode.Reverse
                         ),
                         label = "reels_pulse_scale"
