@@ -1622,6 +1622,42 @@ object DatabaseMigrations {
     }
 
     /**
+     * Migration 58→59: Add link embed columns to messages table.
+     *
+     * Link embeds are URLs that are sent as their own rich preview messages,
+     * separate from surrounding text. This enables:
+     * - Inline link previews in the composer (like iMessage)
+     * - Splitting messages around links on send
+     * - Rich preview cards in chat view
+     *
+     * New columns:
+     * - is_link_embed: Boolean flag indicating this message is a link embed
+     * - link_embed_url: The URL for the embed (for lookup and display)
+     */
+    val MIGRATION_58_59 = object : Migration(58, 59) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            Timber.i("Starting migration 58→59: Add link embed columns to messages and pending_messages")
+
+            // Add is_link_embed column with default false to messages table
+            db.execSQL("ALTER TABLE messages ADD COLUMN is_link_embed INTEGER NOT NULL DEFAULT 0")
+
+            // Add link_embed_url column (nullable) to messages table
+            db.execSQL("ALTER TABLE messages ADD COLUMN link_embed_url TEXT DEFAULT NULL")
+
+            // Create index on is_link_embed for efficient queries filtering link embed messages
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_messages_is_link_embed ON messages(is_link_embed)")
+
+            // Add is_link_embed column to pending_messages table
+            db.execSQL("ALTER TABLE pending_messages ADD COLUMN is_link_embed INTEGER NOT NULL DEFAULT 0")
+
+            // Add link_embed_url column to pending_messages table
+            db.execSQL("ALTER TABLE pending_messages ADD COLUMN link_embed_url TEXT DEFAULT NULL")
+
+            Timber.i("Migration 58→59 complete: Added link embed columns to messages and pending_messages")
+        }
+    }
+
+    /**
      * List of all migrations for use with databaseBuilder.
      *
      * IMPORTANT: Always add new migrations to this array!
@@ -1684,6 +1720,7 @@ object DatabaseMigrations {
         MIGRATION_54_55,
         MIGRATION_55_56,
         MIGRATION_56_57,
-        MIGRATION_57_58
+        MIGRATION_57_58,
+        MIGRATION_58_59
     )
 }

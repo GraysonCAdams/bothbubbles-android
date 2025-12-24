@@ -189,7 +189,36 @@ data class MessageEntity(
      * Only set on outgoing messages created locally.
      */
     @ColumnInfo(name = "split_batch_id")
-    val splitBatchId: String? = null
+    val splitBatchId: String? = null,
+
+    /**
+     * Whether this message is a link embed (URL sent as its own rich preview message).
+     *
+     * Link embeds are created when:
+     * - User pastes a URL that becomes an inline embed in the composer
+     * - User types a URL that is detected and split at send time
+     *
+     * Link embed messages have:
+     * - [text] contains the URL
+     * - [linkEmbedUrl] also contains the URL (for explicit typing)
+     * - Preview metadata is fetched/cached by LinkPreviewRepository
+     *
+     * In the UI, link embeds render as rich preview cards rather than plain text.
+     */
+    @ColumnInfo(name = "is_link_embed", defaultValue = "0")
+    val isLinkEmbed: Boolean = false,
+
+    /**
+     * The URL for link embed messages.
+     *
+     * Only populated when [isLinkEmbed] is true. Contains the normalized URL
+     * that was embedded. Used for:
+     * - Looking up cached preview metadata
+     * - Opening the link when tapped
+     * - Displaying in the conversation list preview
+     */
+    @ColumnInfo(name = "link_embed_url")
+    val linkEmbedUrl: String? = null
 ) {
     /**
      * Whether this message has been sent (no error, not pending)

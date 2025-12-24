@@ -205,7 +205,12 @@ data class MessageUiModel(
     /** Formatted string for when the message was edited (e.g., "2:30 PM") */
     val formattedEditTime: String? = null,
     /** Previous versions of the message text for edit history display */
-    val editHistory: StableList<EditHistoryEntry> = emptyList<EditHistoryEntry>().toStable()
+    val editHistory: StableList<EditHistoryEntry> = emptyList<EditHistoryEntry>().toStable(),
+    // Link embed fields
+    /** Whether this message is a link embed (URL sent as rich preview) */
+    val isLinkEmbed: Boolean = false,
+    /** The URL for link embed messages (for preview lookup and display) */
+    val linkEmbedUrl: String? = null
 ) {
     /** True if this is a sticker that was placed on another message */
     val isPlacedSticker: Boolean

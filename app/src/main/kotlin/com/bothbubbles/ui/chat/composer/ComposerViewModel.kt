@@ -53,15 +53,59 @@ class ComposerViewModel : ViewModel() {
                 _state.update { it.copy(activePanel = ComposerPanel.None) }
             }
 
-            // Attachments
+            // Attachments (legacy - handled via RemoveSegment now)
             is ComposerEvent.RemoveAttachment -> {
-                _state.update { 
-                    val newAttachments = it.attachments.filter { item -> item.id != event.attachment.id }
-                    it.copy(attachments = newAttachments)
-                }
+                // Legacy - no-op, use RemoveSegment instead
             }
             is ComposerEvent.ClearAllAttachments -> {
-                _state.update { it.copy(attachments = emptyList()) }
+                _state.update { it.copy(document = ComposerDocument()) }
+            }
+
+            // Document/Segment Events
+            is ComposerEvent.UpdateTextSegment -> {
+                _state.update { state ->
+                    state.copy(document = state.document.updateTextSegment(event.segmentId, event.text))
+                }
+            }
+            is ComposerEvent.RemoveSegment -> {
+                _state.update { state ->
+                    state.copy(document = state.document.removeSegment(event.segmentId))
+                }
+            }
+            is ComposerEvent.BackspaceAtSegmentStart -> {
+                // Find the previous segment and merge or delete
+                _state.update { state ->
+                    val index = state.document.indexOfSegment(event.segmentId)
+                    if (index > 0) {
+                        val prevSegment = state.document.getSegmentAt(index - 1)
+                        if (prevSegment != null && prevSegment !is ComposerSegment.Text) {
+                            // Delete the non-text segment before this one
+                            state.copy(document = state.document.removeSegment(prevSegment.id))
+                        } else {
+                            state
+                        }
+                    } else {
+                        state
+                    }
+                }
+            }
+            is ComposerEvent.AddLinkEmbed -> {
+                _state.update { state ->
+                    val embed = ComposerSegment.LinkEmbed(
+                        url = event.url,
+                        domain = event.domain
+                    )
+                    state.copy(document = state.document.appendSegment(embed))
+                }
+            }
+            is ComposerEvent.LinkPreviewLoaded -> {
+                _state.update { state ->
+                    state.copy(document = state.document.updateLinkPreviewState(event.segmentId, event.state))
+                }
+            }
+            is ComposerEvent.AddLocationEmbed -> {
+                // Location embeds would need to create a Media segment with the location attachment
+                // For now, no-op as this requires the attachment creation flow
             }
 
             // Reply

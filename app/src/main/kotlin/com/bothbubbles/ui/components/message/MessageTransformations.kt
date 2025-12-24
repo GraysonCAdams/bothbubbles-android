@@ -141,7 +141,10 @@ fun MessageEntity.toUiModel(
         // Edit tracking
         dateEdited = dateEdited,
         formattedEditTime = dateEdited?.let { formatMessageTime(it) },
-        editHistory = editHistory.toStable()
+        editHistory = editHistory.toStable(),
+        // Link embed fields
+        isLinkEmbed = isLinkEmbed,
+        linkEmbedUrl = linkEmbedUrl
     )
 }
 

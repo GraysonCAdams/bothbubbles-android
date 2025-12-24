@@ -50,6 +50,31 @@ interface PendingMessageSource {
     ): Result<String>
 
     /**
+     * Queue a link embed message for sending.
+     *
+     * Link embeds are sent with:
+     * - isLinkEmbed = true
+     * - linkEmbedUrl = the URL
+     * - text = the URL (for display/fallback)
+     *
+     * @param chatGuid Target chat GUID
+     * @param url The URL to embed
+     * @param replyToGuid GUID of message being replied to (for threads)
+     * @param deliveryMode Delivery mode (AUTO, IMESSAGE, LOCAL_SMS, LOCAL_MMS)
+     * @param forcedLocalId Optional local ID (for retry scenarios)
+     * @param splitBatchId Groups related messages composed together
+     * @return Local ID (temp GUID) of the queued message for UI tracking
+     */
+    suspend fun queueLinkEmbedMessage(
+        chatGuid: String,
+        url: String,
+        replyToGuid: String? = null,
+        deliveryMode: MessageDeliveryMode = MessageDeliveryMode.AUTO,
+        forcedLocalId: String? = null,
+        splitBatchId: String? = null
+    ): Result<String>
+
+    /**
      * Retry a failed message.
      *
      * @param localId Local ID of the message to retry

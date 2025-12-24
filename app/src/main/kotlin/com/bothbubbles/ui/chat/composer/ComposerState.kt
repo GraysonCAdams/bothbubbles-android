@@ -15,13 +15,13 @@ import kotlinx.collections.immutable.persistentListOf
  */
 @Immutable
 data class ComposerState(
-    // Text Input
+    // Text Input (legacy - kept for compatibility during transition)
     val text: String = "",
     val cursorPosition: Int = 0,
     val isTextFieldFocused: Boolean = false,
 
-    // Attachments
-    val attachments: List<AttachmentItem> = emptyList(),
+    // Document (segmented composer model - primary content model)
+    val document: ComposerDocument = ComposerDocument(),
     val attachmentWarning: ComposerAttachmentWarning? = null,
 
     // Reply
@@ -73,7 +73,7 @@ data class ComposerState(
      * Whether the composer has content that can be sent.
      */
     val canSend: Boolean
-        get() = text.isNotBlank() || attachments.isNotEmpty()
+        get() = document.canSend
 
     /**
      * Whether any picker panel is expanded (for add button X animation).
@@ -92,13 +92,13 @@ data class ComposerState(
      * Whether to show the voice memo button instead of send button.
      */
     val showVoiceButton: Boolean
-        get() = text.isBlank() && attachments.isEmpty() && inputMode == ComposerInputMode.TEXT
+        get() = document.isEmpty && inputMode == ComposerInputMode.TEXT
 
     /**
      * Whether the current message will be sent as MMS (local SMS with attachments or long text).
      */
     val isMmsMode: Boolean
-        get() = isLocalSmsChat && (attachments.isNotEmpty() || text.length > 160)
+        get() = isLocalSmsChat && (document.attachmentCount > 0 || document.fullText.length > 160)
 
     /**
      * Whether the send mode is SMS.
@@ -107,22 +107,30 @@ data class ComposerState(
         get() = sendMode == ChatSendMode.SMS
 
     /**
-     * Number of attachments currently staged.
+     * Number of attachments currently staged (media + locations).
      */
     val attachmentCount: Int
-        get() = attachments.size
+        get() = document.attachmentCount
 
     /**
      * Whether there are image attachments that can have quality adjusted.
      */
     val hasCompressibleImages: Boolean
-        get() = attachments.any { it.isImage }
+        get() = document.hasCompressibleImages
 
     /**
      * Number of image attachments.
      */
     val imageAttachmentCount: Int
-        get() = attachments.count { it.isImage }
+        get() = document.mediaSegments.count { it.attachment.isImage }
+
+    /**
+     * Whether the segmented composer has any embeds to display.
+     */
+    val hasEmbeds: Boolean
+        get() = document.mediaSegments.isNotEmpty() ||
+                document.linkEmbeds.isNotEmpty() ||
+                document.locationSegments.isNotEmpty()
 }
 
 /**

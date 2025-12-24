@@ -129,7 +129,24 @@ data class PendingMessageEntity(
      * Format: "batch-{UUID}" or null for single messages.
      */
     @ColumnInfo(name = "split_batch_id")
-    val splitBatchId: String? = null
+    val splitBatchId: String? = null,
+
+    /**
+     * Whether this pending message is a link embed (URL sent as a rich preview message).
+     *
+     * Link embeds are created when:
+     * - User pastes a URL that becomes an inline embed in the composer
+     * - User types a URL that is detected and split at send time
+     */
+    @ColumnInfo(name = "is_link_embed", defaultValue = "0")
+    val isLinkEmbed: Boolean = false,
+
+    /**
+     * The URL for link embed messages.
+     * Only populated when [isLinkEmbed] is true.
+     */
+    @ColumnInfo(name = "link_embed_url")
+    val linkEmbedUrl: String? = null
 )
 
 /**

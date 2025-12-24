@@ -148,8 +148,13 @@ internal fun SegmentedMessageBubble(
     val coroutineScope = rememberCoroutineScope()
 
     // Parse message into segments
+    // Link embed messages use a special parser that renders only the link preview
     val segments = remember(message, firstUrl) {
-        MessageSegmentParser.parse(message, firstUrl)
+        if (message.isLinkEmbed) {
+            MessageSegmentParser.parseLinkEmbed(message)
+        } else {
+            MessageSegmentParser.parse(message, firstUrl)
+        }
     }
 
     // Reply swipe state (toward center - moves bubble)

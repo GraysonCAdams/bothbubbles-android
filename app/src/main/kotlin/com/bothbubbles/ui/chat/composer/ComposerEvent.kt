@@ -261,6 +261,46 @@ sealed interface ComposerEvent {
      * User navigated in the mention popup (arrow keys).
      */
     data class MentionPopupNavigate(val direction: MentionNavigationDirection) : ComposerEvent
+
+    // ============================================
+    // Document/Segment Events (for segmented composer)
+    // ============================================
+
+    /**
+     * User updated text in a specific text segment.
+     */
+    data class UpdateTextSegment(val segmentId: String, val text: String) : ComposerEvent
+
+    /**
+     * User removed a segment (media, link embed, or location).
+     */
+    data class RemoveSegment(val segmentId: String) : ComposerEvent
+
+    /**
+     * User added a link embed from pasted URL.
+     */
+    data class AddLinkEmbed(val url: String, val domain: String) : ComposerEvent
+
+    /**
+     * Link preview fetch completed for a segment.
+     */
+    data class LinkPreviewLoaded(val segmentId: String, val state: ComposerLinkPreviewState) : ComposerEvent
+
+    /**
+     * User added a location embed.
+     */
+    data class AddLocationEmbed(
+        val latitude: Double,
+        val longitude: Double,
+        val name: String?,
+        val address: String?
+    ) : ComposerEvent
+
+    /**
+     * Backspace was pressed at the beginning of a text segment.
+     * Used to delete the preceding segment.
+     */
+    data class BackspaceAtSegmentStart(val segmentId: String) : ComposerEvent
 }
 
 /**

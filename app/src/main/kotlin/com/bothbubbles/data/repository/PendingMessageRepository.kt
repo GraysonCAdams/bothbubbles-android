@@ -288,6 +288,129 @@ class PendingMessageRepository @Inject constructor(
     }
 
     /**
+     * Queue a link embed message for sending.
+     *
+     * Link embeds are sent as text messages with special flags:
+     * - isLinkEmbed = true
+     * - linkEmbedUrl = the URL
+     * - text = the URL (for display/fallback)
+     */
+    override suspend fun queueLinkEmbedMessage(
+        chatGuid: String,
+        url: String,
+        replyToGuid: String?,
+        deliveryMode: MessageDeliveryMode,
+        forcedLocalId: String?,
+        splitBatchId: String?
+    ): Result<String> = runCatching {
+        val createdAt = System.currentTimeMillis()
+
+        // Generate clientGuid with duplicate detection
+        val clientGuid = synchronized(globalRecentSends) {
+            val guid = forcedLocalId ?: "temp-${UUID.randomUUID()}"
+
+            // Track recent sends for duplicate detection
+            val urlHash = url.hashCode()
+            val cutoffTime = createdAt - globalDuplicateWindowMs
+            globalRecentSends.removeAll { it.timestamp < cutoffTime }
+
+            val duplicate = globalRecentSends.find {
+                it.chatGuid == chatGuid && it.textHash == urlHash
+            }
+            if (duplicate != null) {
+                Timber.w("Potential duplicate link embed detected! chatGuid=$chatGuid, url=$url, existing=${duplicate.localId}")
+                return@runCatching duplicate.localId
+            }
+
+            globalRecentSends.add(GlobalRecentSend(
+                chatGuid = chatGuid,
+                textHash = urlHash,
+                textPreview = url.take(30),
+                timestamp = createdAt,
+                localId = guid
+            ))
+            if (globalRecentSends.size > maxGlobalRecentSends) {
+                globalRecentSends.removeAt(0)
+            }
+
+            guid
+        }
+
+        val messageSource = inferMessageSource(chatGuid, deliveryMode)
+
+        // Check for existing pending messages for dependency ordering
+        val latestPending = pendingMessageDao.getLatestPendingOrSending(chatGuid)
+        val dependsOnLocalId = latestPending?.localId
+
+        val messageId = database.withTransaction {
+            // 1. Create pending message
+            val pendingMessage = PendingMessageEntity(
+                localId = clientGuid,
+                chatGuid = chatGuid,
+                text = url, // URL as text
+                subject = null,
+                replyToGuid = replyToGuid,
+                effectId = null,
+                deliveryMode = deliveryMode.name,
+                syncStatus = PendingSyncStatus.PENDING.name,
+                createdAt = createdAt,
+                attributedBodyJson = null,
+                dependsOnLocalId = dependsOnLocalId,
+                splitBatchId = splitBatchId,
+                isLinkEmbed = true,
+                linkEmbedUrl = url
+            )
+            val pendingId = pendingMessageDao.insert(pendingMessage)
+
+            // 2. Look up the chat to get unifiedChatId
+            val chat = chatDao.getChatByGuid(chatGuid)
+            val unifiedChatId = chat?.unifiedChatId
+
+            // 3. Create local echo with link embed flags
+            val localEcho = MessageEntity(
+                guid = clientGuid,
+                chatGuid = chatGuid,
+                unifiedChatId = unifiedChatId,
+                text = url,
+                subject = null,
+                dateCreated = createdAt,
+                isFromMe = true,
+                hasAttachments = false,
+                threadOriginatorGuid = replyToGuid,
+                expressiveSendStyleId = null,
+                messageSource = messageSource.name,
+                splitBatchId = splitBatchId,
+                isLinkEmbed = true,
+                linkEmbedUrl = url
+            )
+            messageDao.insertMessage(localEcho)
+
+            // 4. Update unified chat's latest message
+            unifiedChatId?.let { unifiedId ->
+                unifiedChatDao.updateLatestMessageIfNewer(
+                    id = unifiedId,
+                    date = createdAt,
+                    text = url,
+                    guid = clientGuid,
+                    isFromMe = true,
+                    hasAttachments = false,
+                    source = messageSource.name,
+                    dateDelivered = null,
+                    dateRead = null,
+                    error = 0
+                )
+            }
+
+            pendingId
+        }
+
+        // Enqueue WorkManager job
+        enqueueWorker(messageId, clientGuid)
+
+        clientGuid
+    }
+
+    /**
      * Infer the message source based on chat GUID and delivery mode.
      */
     private fun inferMessageSource(chatGuid: String, deliveryMode: MessageDeliveryMode): MessageSource {

@@ -105,6 +105,49 @@ object MessageSegmentParser {
         // Even non-media attachments (files) should be rendered as FileSegments
         // rather than being hidden by SimpleBubbleContent (which doesn't render attachments).
         val hasAttachments = message.attachments.isNotEmpty()
-        return hasAttachments || hasLinkPreview
+
+        // Link embed messages always need segmentation for the link preview card
+        val isLinkEmbed = message.isLinkEmbed
+
+        return hasAttachments || hasLinkPreview || isLinkEmbed
+    }
+
+    /**
+     * Parses a link embed message into segments.
+     * Link embeds render as just a link preview card with no text bubble.
+     */
+    fun parseLinkEmbed(message: MessageUiModel): List<MessageSegment> {
+        val url = message.linkEmbedUrl ?: message.text ?: return emptyList()
+        val domain = try {
+            java.net.URI(if (url.startsWith("http")) url else "https://$url")
+                .host?.removePrefix("www.") ?: url
+        } catch (e: Exception) {
+            url
+        }
+
+        // Create a DetectedUrl for the link preview segment
+        val detectedUrl = com.bothbubbles.util.parsing.DetectedUrl(
+            startIndex = 0,
+            endIndex = url.length,
+            matchedText = url,
+            url = if (url.startsWith("http")) url else "https://$url",
+            domain = domain
+        )
+
+        // Check if this is a YouTube URL
+        val youtubeVideo = YouTubeUrlParser.parseUrl(detectedUrl.url)
+        return if (youtubeVideo != null) {
+            listOf(
+                MessageSegment.YouTubeVideoSegment(
+                    videoId = youtubeVideo.videoId,
+                    originalUrl = youtubeVideo.originalUrl,
+                    thumbnailUrl = youtubeVideo.thumbnailUrl,
+                    startTimeSeconds = youtubeVideo.startTimeSeconds,
+                    isShort = youtubeVideo.isShort
+                )
+            )
+        } else {
+            listOf(MessageSegment.LinkPreviewSegment(detectedUrl.url, detectedUrl))
+        }
     }
 }
