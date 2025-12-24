@@ -2,7 +2,6 @@ package com.bothbubbles.ui.components.reels
 
 import android.content.Intent
 import android.net.Uri
-import android.view.HapticFeedbackConstants
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
@@ -71,7 +70,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import android.view.HapticFeedbackConstants
+import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -109,6 +111,9 @@ import com.bothbubbles.ui.components.common.Avatar
 import com.bothbubbles.util.parsing.HtmlEntityDecoder
 import com.bothbubbles.ui.components.message.ReactionsDisplay
 import com.bothbubbles.ui.components.message.ReactionUiModel
+import com.bothbubbles.util.HapticUtils
+import com.bothbubbles.util.ThrottledHaptic
+import com.bothbubbles.util.rememberThrottledHaptic
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -139,6 +144,7 @@ fun ReelsFeedScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
 
     // Unwatched only filter - set from initial value (no toggle inside feed)
     val unwatchedOnly = initialUnwatchedOnly
@@ -179,7 +185,10 @@ fun ReelsFeedScreen(
                 )
                 Spacer(modifier = Modifier.height(24.dp))
                 FilledTonalButton(
-                    onClick = onClose
+                    onClick = {
+                        HapticUtils.onTap(haptic)
+                        onClose()
+                    }
                 ) {
                     Text("Close")
                 }
@@ -187,7 +196,10 @@ fun ReelsFeedScreen(
 
             // Close button
             IconButton(
-                onClick = onClose,
+                onClick = {
+                    HapticUtils.onTap(haptic)
+                    onClose()
+                },
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .windowInsetsPadding(WindowInsets.statusBars)
@@ -227,7 +239,10 @@ fun ReelsFeedScreen(
 
             // Close button
             IconButton(
-                onClick = onClose,
+                onClick = {
+                    HapticUtils.onTap(haptic)
+                    onClose()
+                },
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .windowInsetsPadding(WindowInsets.statusBars)
@@ -285,22 +300,17 @@ fun ReelsFeedScreen(
         }
     }
 
-    // Track viewed status when settling on a page (for both social media and attachment videos)
+    // Mark reel as viewed immediately when displayed (regardless of play status or download state)
     LaunchedEffect(pagerState.currentPage, filteredReels) {
         val currentReel = filteredReels.getOrNull(pagerState.currentPage)
-        if (currentReel != null && currentReel.isReadyToPlay && !currentReel.isViewed) {
-            // Wait 2 seconds before marking as viewed
-            delay(2000)
-            // Only mark if still on same page
-            if (pagerState.currentPage == filteredReels.indexOf(currentReel)) {
-                // Pass the appropriate identifier: originalUrl for social media, guid for attachments
-                val identifier = if (currentReel.isAttachment) {
-                    currentReel.attachmentVideo?.guid ?: return@LaunchedEffect
-                } else {
-                    currentReel.originalUrl
-                }
-                onVideoViewed(identifier)
+        if (currentReel != null && !currentReel.isViewed) {
+            // Pass the appropriate identifier: originalUrl for social media, guid for attachments
+            val identifier = if (currentReel.isAttachment) {
+                currentReel.attachmentVideo?.guid ?: return@LaunchedEffect
+            } else {
+                currentReel.originalUrl
             }
+            onVideoViewed(identifier)
         }
     }
 
@@ -312,6 +322,15 @@ fun ReelsFeedScreen(
             if (prefetchReel != null && prefetchReel.isPending && !prefetchReel.isDownloading) {
                 onStartDownload(prefetchReel.originalUrl)
             }
+        }
+    }
+
+    // Haptic feedback when page settles on a new video
+    var previousPage by remember { mutableStateOf(pagerState.currentPage) }
+    LaunchedEffect(pagerState.settledPage) {
+        if (pagerState.settledPage != previousPage) {
+            HapticUtils.onConfirm(haptic)
+            previousPage = pagerState.settledPage
         }
     }
 
@@ -364,7 +383,10 @@ fun ReelsFeedScreen(
 
         // Close button - top left (fades with hold gesture)
         IconButton(
-            onClick = onClose,
+            onClick = {
+                HapticUtils.onTap(haptic)
+                onClose()
+            },
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .windowInsetsPadding(WindowInsets.statusBars)
@@ -383,6 +405,7 @@ fun ReelsFeedScreen(
         // Share button - top right (fades with hold gesture)
         IconButton(
             onClick = {
+                HapticUtils.onTap(haptic)
                 val currentReel = filteredReels.getOrNull(pagerState.currentPage)
                 if (currentReel != null) {
                     val shareIntent = Intent(Intent.ACTION_SEND).apply {
@@ -438,7 +461,7 @@ private fun ReelPage(
     onReplyClick: () -> Unit
 ) {
     val context = LocalContext.current
-    val view = LocalView.current
+    val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
     var showTapbackSelector by remember { mutableStateOf(false) }
     var isPaused by remember { mutableStateOf(false) }
@@ -519,13 +542,13 @@ private fun ReelPage(
             .pointerInput(Unit) {
                 detectTapGestures(
                     onDoubleTap = {
-                        view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                        HapticUtils.onConfirm(haptic)
                         showTapbackSelector = true
                     },
                     onLongPress = {
                         // Only trigger hold-to-hide if not scrubbing
                         if (!isScrubbing) {
-                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                            HapticUtils.onLongPress(haptic)
                             isHolding = true
                             onHoldStart()
                         }
@@ -548,12 +571,12 @@ private fun ReelPage(
                             exoPlayer.pause()
                             isPaused = true
                             showPauseIndicator = true
-                            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                            HapticUtils.onTap(haptic)
                         } else {
                             exoPlayer.play()
                             isPaused = false
                             showPauseIndicator = true
-                            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                            HapticUtils.onTap(haptic)
                         }
                         // Hide pause indicator after a short delay
                         scope.launch {
@@ -686,7 +709,7 @@ private fun ReelPage(
             TapbackSelector(
                 currentTapback = reel.currentTapback,
                 onTapbackSelected = { tapback ->
-                    view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                    HapticUtils.onConfirm(haptic)
                     tapbackAcknowledgement = tapback
                     onTapback(tapback)
                     showTapbackSelector = false
@@ -710,7 +733,7 @@ private fun PendingReelPage(
     onOpenInBrowser: () -> Unit
 ) {
     val context = LocalContext.current
-    val view = LocalView.current
+    val haptic = LocalHapticFeedback.current
 
     // Auto-start download when this becomes the current page
     LaunchedEffect(isCurrentPage) {
@@ -794,11 +817,11 @@ private fun PendingReelPage(
                         reel = reel,
                         linkMetadata = linkMetadata,
                         onRetry = {
-                            view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                            HapticUtils.onConfirm(haptic)
                             onStartDownload()
                         },
                         onOpenInBrowser = {
-                            view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                            HapticUtils.onTap(haptic)
                             onOpenInBrowser()
                         }
                     )
@@ -846,7 +869,7 @@ private fun PendingReelPage(
                     Spacer(modifier = Modifier.height(8.dp))
                     Surface(
                         onClick = {
-                            view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                            HapticUtils.onTap(haptic)
                             onStartDownload()
                         },
                         shape = RoundedCornerShape(20.dp),
@@ -1091,6 +1114,7 @@ private fun VideoScrubber(
     onScrubEnd: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val haptic = LocalHapticFeedback.current
     var scrubberWidth by remember { mutableFloatStateOf(0f) }
     var isDragging by remember { mutableStateOf(false) }
 
@@ -1108,6 +1132,7 @@ private fun VideoScrubber(
                 detectDragGestures(
                     onDragStart = { offset ->
                         isDragging = true
+                        HapticUtils.onLongPress(haptic)
                         onScrubStart()
                         if (scrubberWidth > 0) {
                             val newProgress = (offset.x / scrubberWidth).coerceIn(0f, 1f)
@@ -1123,6 +1148,7 @@ private fun VideoScrubber(
                     },
                     onDragEnd = {
                         isDragging = false
+                        HapticUtils.onConfirm(haptic)
                         onScrubEnd()
                     },
                     onDragCancel = {
@@ -1179,6 +1205,7 @@ private fun SenderInfoBadge(
     onReplyClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val haptic = LocalHapticFeedback.current
     // Use display name or address for avatar
     val displayName = senderName ?: senderAddress ?: "Unknown"
 
@@ -1247,7 +1274,10 @@ private fun SenderInfoBadge(
                 // Open in browser button (only for social media videos)
                 if (onOpenInBrowser != null) {
                     IconButton(
-                        onClick = onOpenInBrowser,
+                        onClick = {
+                            HapticUtils.onTap(haptic)
+                            onOpenInBrowser()
+                        },
                         modifier = Modifier
                             .size(36.dp)
                             .background(Color.White.copy(alpha = 0.2f), CircleShape)
@@ -1279,7 +1309,10 @@ private fun SenderInfoBadge(
                 contentAlignment = Alignment.Center
             ) {
                 Surface(
-                    onClick = onReplyClick,
+                    onClick = {
+                        HapticUtils.onTap(haptic)
+                        onReplyClick()
+                    },
                     shape = RoundedCornerShape(16.dp),
                     color = Color.White.copy(alpha = 0.15f)
                 ) {
@@ -1388,6 +1421,7 @@ private fun TapbackButton(
     isSelected: Boolean,
     onClick: () -> Unit
 ) {
+    val haptic = LocalHapticFeedback.current
     val scale by animateFloatAsState(
         targetValue = if (isSelected) 1.1f else 1f,
         label = "tapback_scale"
@@ -1397,7 +1431,10 @@ private fun TapbackButton(
         modifier = Modifier
             .size(80.dp)
             .scale(scale)
-            .clickable(onClick = onClick),
+            .clickable {
+                HapticUtils.onTap(haptic)
+                onClick()
+            },
         shape = RoundedCornerShape(16.dp),
         color = if (isSelected) {
             MaterialTheme.colorScheme.primaryContainer
