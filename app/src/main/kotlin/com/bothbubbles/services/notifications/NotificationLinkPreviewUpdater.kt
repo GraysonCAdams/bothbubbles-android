@@ -137,8 +137,9 @@ class NotificationLinkPreviewUpdater @Inject constructor(
             var attachmentUri: Uri? = null
             var attachmentMimeType: String? = null
 
-            if (!preview.imageUrl.isNullOrBlank()) {
-                val imageFile = downloadPreviewImage(preview.imageUrl, completion.messageGuid)
+            val imageUrl = preview.imageUrl
+            if (!imageUrl.isNullOrBlank()) {
+                val imageFile = downloadPreviewImage(imageUrl, completion.messageGuid)
                 if (imageFile != null) {
                     try {
                         attachmentUri = FileProvider.getUriForFile(

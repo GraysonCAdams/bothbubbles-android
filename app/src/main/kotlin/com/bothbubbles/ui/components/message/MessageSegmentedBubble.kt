@@ -51,6 +51,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -121,6 +122,7 @@ internal fun SegmentedMessageBubble(
     showDeliveryIndicator: Boolean = true,
     onReply: ((String) -> Unit)? = null,
     onSwipeStateChanged: ((Boolean) -> Unit)? = null,
+    onDateRevealProgress: ((Float) -> Unit)? = null,
     onRetry: ((String) -> Unit)? = null,
     onRetryAsSms: ((String) -> Unit)? = null,
     onDeleteMessage: ((String) -> Unit)? = null,
@@ -202,6 +204,11 @@ internal fun SegmentedMessageBubble(
 
     // Tap-to-show timestamp state
     var showTimestamp by remember { mutableStateOf(false) }
+
+    // Report date reveal progress to parent for fading out external elements (e.g., EtaStopSharingLink)
+    LaunchedEffect(dateRevealProgress.value) {
+        onDateRevealProgress?.invoke(dateRevealProgress.value)
+    }
 
     // Delivery status legend dialog state
     var showStatusLegend by remember { mutableStateOf(false) }
@@ -559,7 +566,8 @@ internal fun SegmentedMessageBubble(
                                             HapticUtils.onLongPress(hapticFeedback)
                                             onLongPress()
                                         },
-                                        onOpenReelsFeed = onOpenReelsFeed
+                                        onOpenReelsFeed = onOpenReelsFeed,
+                                        swipeProgress = dateRevealProgress.value
                                     )
                                 }
 

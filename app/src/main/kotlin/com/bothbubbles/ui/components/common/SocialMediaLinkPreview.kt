@@ -16,6 +16,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -130,6 +131,7 @@ fun SmartLinkPreview(
     maxWidth: Dp = 280.dp,
     onLongPress: (() -> Unit)? = null,
     onOpenReelsFeed: (() -> Unit)? = null,
+    swipeProgress: Float = 0f,
     viewModel: SocialMediaLinkViewModel = hiltViewModel(),
     linkPreviewViewModel: LinkPreviewViewModel = hiltViewModel()
 ) {
@@ -179,6 +181,7 @@ fun SmartLinkPreview(
             },
             onOpenReelsFeed = onOpenReelsFeed,
             onLongPress = onLongPress,
+            swipeProgress = swipeProgress,
             modifier = modifier
         )
     } else {
@@ -196,18 +199,24 @@ fun SmartLinkPreview(
             )
 
             // Show "Show Cached" link if video is cached but dismissed
+            // Fades out during swipe-to-reveal gesture
             if (isDismissed && hasCached && platform != null) {
                 Text(
                     text = "Show Cached",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier
+                        .alpha(1f - swipeProgress)
                         .clickable {
                             viewModel.undismissLink(messageGuid, url)
                             showVideoPlayer = true
                             isDismissed = false
                         }
-                        .padding(top = 4.dp)
+                        .padding(
+                            start = if (isFromMe) 0.dp else 12.dp,
+                            end = if (isFromMe) 12.dp else 0.dp,
+                            top = 4.dp
+                        )
                 )
             }
         }

@@ -174,6 +174,11 @@ class MainActivity : ComponentActivity() {
     private fun parseShareIntent(intent: Intent?): ShareIntentData? {
         if (intent == null) return null
 
+        // Debug logging for share intent diagnosis
+        Timber.d("parseShareIntent: action=${intent.action}, type=${intent.type}, data=${intent.data}")
+        Timber.d("parseShareIntent: extras=${intent.extras?.keySet()?.joinToString { "$it=${intent.extras?.get(it)}" }}")
+        Timber.d("parseShareIntent: clipData itemCount=${intent.clipData?.itemCount}, clipData[0]=${intent.clipData?.getItemAt(0)?.let { "text=${it.text}, uri=${it.uri}" }}")
+
         return when (intent.action) {
             // Voice command intents (Google Assistant, Android Auto "send a message to...")
             Intent.ACTION_SENDTO -> {
@@ -264,8 +269,20 @@ class MainActivity : ComponentActivity() {
 
                 when {
                     mimeType.startsWith("text/") -> {
-                        val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
+                        var sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
                         val sharedSubject = intent.getStringExtra(Intent.EXTRA_SUBJECT)
+
+                        // Fallback: Check ClipData for text (some apps like TikTok use this)
+                        if (sharedText == null) {
+                            sharedText = intent.clipData?.let { clipData ->
+                                if (clipData.itemCount > 0) {
+                                    val item = clipData.getItemAt(0)
+                                    // Try text first, then coerce URI to text
+                                    item.text?.toString() ?: item.uri?.toString()
+                                } else null
+                            }
+                        }
+
                         // Combine subject and text if both present
                         val text = when {
                             sharedSubject != null && sharedText != null -> "$sharedSubject\n$sharedText"
@@ -281,7 +298,17 @@ class MainActivity : ComponentActivity() {
                     }
                     else -> {
                         // Handle media (image, video, audio, files)
-                        val uri = getParcelableExtraCompat<Uri>(intent, Intent.EXTRA_STREAM)
+                        var uri = getParcelableExtraCompat<Uri>(intent, Intent.EXTRA_STREAM)
+
+                        // Fallback: Check ClipData for URI (some apps use this instead of EXTRA_STREAM)
+                        if (uri == null) {
+                            uri = intent.clipData?.let { clipData ->
+                                if (clipData.itemCount > 0) {
+                                    clipData.getItemAt(0).uri
+                                } else null
+                            }
+                        }
+
                         if (uri != null || directShareChatGuid != null) {
                             ShareIntentData(
                                 sharedUris = listOfNotNull(uri),
@@ -292,9 +319,21 @@ class MainActivity : ComponentActivity() {
                 }
             }
             Intent.ACTION_SEND_MULTIPLE -> {
-                val uris = getParcelableArrayListExtraCompat<Uri>(intent, Intent.EXTRA_STREAM)
+                var uris = getParcelableArrayListExtraCompat<Uri>(intent, Intent.EXTRA_STREAM)
                 val directShareChatGuid = intent.getStringExtra(NotificationChannelManager.EXTRA_CHAT_GUID)
                     ?: extractChatGuidFromShortcutId(intent)
+
+                // Fallback: Check ClipData for URIs
+                if (uris.isNullOrEmpty()) {
+                    uris = intent.clipData?.let { clipData ->
+                        ArrayList<Uri>().apply {
+                            for (i in 0 until clipData.itemCount) {
+                                clipData.getItemAt(i).uri?.let { add(it) }
+                            }
+                        }.takeIf { it.isNotEmpty() }
+                    }
+                }
+
                 if (!uris.isNullOrEmpty() || directShareChatGuid != null) {
                     ShareIntentData(
                         sharedUris = uris ?: emptyList(),
@@ -303,6 +342,8 @@ class MainActivity : ComponentActivity() {
                 } else null
             }
             else -> null
+        }.also { result ->
+            Timber.d("parseShareIntent result: sharedText=${result?.sharedText?.take(100)}, uris=${result?.sharedUris?.size}, directShare=${result?.directShareChatGuid}, recipient=${result?.recipientAddress}")
         }
     }
 

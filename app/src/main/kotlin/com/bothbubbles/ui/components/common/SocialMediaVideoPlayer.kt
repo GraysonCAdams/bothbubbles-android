@@ -49,6 +49,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -131,6 +132,7 @@ fun SocialMediaVideoPlayer(
     onOpenInBrowser: () -> Unit,
     onOpenReelsFeed: (() -> Unit)? = null,
     onLongPress: (() -> Unit)? = null,
+    swipeProgress: Float = 0f,
     modifier: Modifier = Modifier
 ) {
     var state by remember { mutableStateOf<SocialMediaVideoState>(SocialMediaVideoState.Idle) }
@@ -344,18 +346,24 @@ fun SocialMediaVideoPlayer(
         }
 
         // "Show Original" link - outside Surface with no background, aligned to message side
+        // Fades out during swipe-to-reveal gesture
         if (state !is SocialMediaVideoState.Dismissed && state !is SocialMediaVideoState.Idle) {
             Text(
                 text = "Show Original",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier
+                    .alpha(1f - swipeProgress)
                     .clickable {
                         fetchJob?.cancel()
                         state = SocialMediaVideoState.Dismissed
                         onShowOriginal()
                     }
-                    .padding(top = 4.dp)
+                    .padding(
+                        start = if (isFromMe) 0.dp else 12.dp,
+                        end = if (isFromMe) 12.dp else 0.dp,
+                        top = 4.dp
+                    )
             )
         }
     }

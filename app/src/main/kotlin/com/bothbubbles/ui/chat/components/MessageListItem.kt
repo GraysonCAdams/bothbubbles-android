@@ -14,6 +14,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -120,6 +121,9 @@ fun MessageListItem(
     val effectsState by effectsDelegate.state.collectAsStateWithLifecycle()
     val etaSharingState by etaSharingDelegate.etaSharingState.collectAsStateWithLifecycle()
     val autoDownloadEnabled by attachmentDelegate.autoDownloadEnabled.collectAsStateWithLifecycle()
+
+    // Track date reveal swipe progress for fading out subtext elements
+    var dateRevealProgress by remember { mutableFloatStateOf(0f) }
 
     val canTapback = !message.text.isNullOrBlank() &&
         message.isServerOrigin &&
@@ -355,6 +359,9 @@ fun MessageListItem(
                     onSwipeStateChanged = { isSwiping ->
                         onSwipingMessageChange(if (isSwiping) message.guid else null)
                     },
+                    onDateRevealProgress = { progress ->
+                        dateRevealProgress = progress
+                    },
                     onRetry = callbacks.onRetryMessage,
                     onRetryAsSms = callbacks.onRetryAsSms,
                     onDeleteMessage = callbacks.onDeleteMessage,
@@ -372,16 +379,21 @@ fun MessageListItem(
             }
         }
 
-        // ETA stop sharing link
+        // ETA stop sharing link - fades out during swipe-to-reveal gesture
         if (etaSharingState.isCurrentlySharing && index == latestEtaMessageIndex) {
             Box(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .alpha(1f - dateRevealProgress),
                 contentAlignment = Alignment.CenterEnd
             ) {
                 EtaStopSharingLink(
                     isVisible = true,
                     onStopSharing = callbacks.onStopSharingEta,
-                    modifier = Modifier.padding(end = 16.dp)
+                    modifier = Modifier.padding(
+                        start = 12.dp,
+                        end = 16.dp
+                    )
                 )
             }
         }

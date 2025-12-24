@@ -110,6 +110,8 @@ fun MessageBubble(
     onReplyIndicatorClick: ((String) -> Unit)? = null,
     // Callback when swipe gesture starts/ends. Used to hide stickers during swipe.
     onSwipeStateChanged: ((Boolean) -> Unit)? = null,
+    // Callback for date reveal swipe progress (0.0 to 1.0). Used to fade out subtext elements.
+    onDateRevealProgress: ((Float) -> Unit)? = null,
     // Callback for retrying a failed message. Pass message GUID when triggered.
     onRetry: ((String) -> Unit)? = null,
     // Callback to retry as SMS (for error 22 - not registered with iMessage)
@@ -246,6 +248,7 @@ fun MessageBubble(
                     showDeliveryIndicator = showDeliveryIndicator,
                     onReply = onReply,
                     onSwipeStateChanged = onSwipeStateChanged,
+                    onDateRevealProgress = onDateRevealProgress,
                     onRetry = onRetry,
                     onRetryAsSms = onRetryAsSms,
                     onDeleteMessage = onDeleteMessage,
@@ -276,6 +279,7 @@ fun MessageBubble(
                     showDeliveryIndicator = showDeliveryIndicator,
                     onReply = onReply,
                     onSwipeStateChanged = onSwipeStateChanged,
+                    onDateRevealProgress = onDateRevealProgress,
                     onRetry = onRetry,
                     onRetryAsSms = onRetryAsSms,
                     onDeleteMessage = onDeleteMessage,
