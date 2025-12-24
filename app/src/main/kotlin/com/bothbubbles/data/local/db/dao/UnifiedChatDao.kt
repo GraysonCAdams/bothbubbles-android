@@ -51,6 +51,9 @@ interface UnifiedChatDao {
     @Query("SELECT * FROM unified_chats WHERE id = :id")
     fun observeById(id: String): Flow<UnifiedChatEntity?>
 
+    @Query("SELECT * FROM unified_chats WHERE source_id = :sourceId LIMIT 1")
+    fun observeBySourceId(sourceId: String): Flow<UnifiedChatEntity?>
+
     // ==================== Get Queries ====================
 
     @Query("""

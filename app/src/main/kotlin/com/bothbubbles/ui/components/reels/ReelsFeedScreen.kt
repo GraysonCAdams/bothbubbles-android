@@ -110,11 +110,8 @@ import com.bothbubbles.services.linkpreview.LinkPreviewService
 import com.bothbubbles.services.socialmedia.SocialMediaPlatform
 import com.bothbubbles.ui.components.common.Avatar
 import com.bothbubbles.util.parsing.HtmlEntityDecoder
-import com.bothbubbles.ui.components.message.ReactionsDisplay
 import com.bothbubbles.ui.components.message.ReactionUiModel
 import com.bothbubbles.util.HapticUtils
-import com.bothbubbles.util.ThrottledHaptic
-import com.bothbubbles.util.rememberThrottledHaptic
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
@@ -306,28 +303,30 @@ fun ReelsFeedScreen(
     // Track if we've already shown the "caught up" toast this session
     var hasShownCaughtUpToast by remember { mutableStateOf(false) }
 
+    // Track the initial count of unwatched reels (before any are marked as viewed)
+    // This is the boundary index where unwatched ends and watched begins
+    val initialUnwatchedCount = remember(filteredReels) {
+        filteredReels.count { !it.isViewed }
+    }
+
     // Detect transition from last unwatched to watched video
-    // Reels are sorted: unwatched first (by time desc), then watched (by time desc)
-    // So when we move from an unwatched to a watched reel, we've passed the last unwatched
-    LaunchedEffect(pagerState.currentPage, filteredReels) {
+    // Reels are sorted: unwatched first (newest→oldest), then watched (newest→oldest)
+    // Show toast when user crosses the boundary AND there were unwatched reels initially
+    LaunchedEffect(pagerState.currentPage, initialUnwatchedCount) {
         // Only show this in "All reels" mode (not unwatched only)
         if (unwatchedOnly || hasShownCaughtUpToast) return@LaunchedEffect
 
+        // Only show if there were initially unwatched reels
+        if (initialUnwatchedCount == 0) return@LaunchedEffect
+
         val currentPage = pagerState.currentPage
-        val previousPage = currentPage - 1 // We're swiping down (next videos are higher indices)
 
-        // Check if we came from an unwatched video and landed on a watched one
-        val previousReel = filteredReels.getOrNull(previousPage)
-        val currentReel = filteredReels.getOrNull(currentPage)
-
-        if (previousReel != null && currentReel != null) {
-            // If previous was unwatched and current is watched, we just passed the boundary
-            // Since unwatched are sorted first, this means we've caught up on all unwatched
-            if (!previousReel.isViewed && currentReel.isViewed) {
-                hasShownCaughtUpToast = true
-                scope.launch {
-                    snackbarHostState.showSnackbar("You're all caught up!")
-                }
+        // Show toast when crossing from the unwatched section to the watched section
+        // The boundary is at index (initialUnwatchedCount - 1) to (initialUnwatchedCount)
+        if (currentPage == initialUnwatchedCount) {
+            hasShownCaughtUpToast = true
+            scope.launch {
+                snackbarHostState.showSnackbar("You're all caught up!")
             }
         }
     }
@@ -361,14 +360,6 @@ fun ReelsFeedScreen(
         }
     }
 
-    // Subtle haptic feedback when page settles on a new video
-    var previousPage by remember { mutableStateOf(pagerState.currentPage) }
-    LaunchedEffect(pagerState.settledPage) {
-        if (pagerState.settledPage != previousPage) {
-            HapticUtils.onDragTransition(haptic)
-            previousPage = pagerState.settledPage
-        }
-    }
 
     Box(
         modifier = modifier
@@ -1245,6 +1236,12 @@ private fun SenderInfoBadge(
     // Use display name or address for avatar
     val displayName = senderName ?: senderAddress ?: "Unknown"
 
+    // Group reactions by type for inline display
+    val groupedReactions = remember(reactions) {
+        reactions.groupBy { it.tapback }
+            .filter { it.value.isNotEmpty() }
+    }
+
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(12.dp),
@@ -1328,17 +1325,7 @@ private fun SenderInfoBadge(
                 }
             }
 
-            // Reactions display (if any)
-            if (reactions.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(8.dp))
-                ReactionsDisplay(
-                    reactions = reactions,
-                    isFromMe = false, // Always show as received in Reels context
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-
-            // Centered reply count/button with comment icon
+            // Centered reply/reactions pill - tapping opens thread modal
             Spacer(modifier = Modifier.height(8.dp))
             Box(
                 modifier = Modifier.fillMaxWidth(),
@@ -1356,6 +1343,7 @@ private fun SenderInfoBadge(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
                     ) {
+                        // Reply icon and count
                         Icon(
                             Icons.Outlined.ChatBubbleOutline,
                             contentDescription = null,
@@ -1372,6 +1360,25 @@ private fun SenderInfoBadge(
                             style = MaterialTheme.typography.labelMedium,
                             color = Color.White
                         )
+
+                        // Inline reactions with separator (if any)
+                        if (groupedReactions.isNotEmpty()) {
+                            Text(
+                                text = " \u2022 ",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = Color.White.copy(alpha = 0.6f)
+                            )
+                            groupedReactions.entries.forEachIndexed { index, (tapback, reactionsList) ->
+                                if (index > 0) {
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                }
+                                Text(
+                                    text = "${tapback.emoji}${reactionsList.size}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = Color.White
+                                )
+                            }
+                        }
                     }
                 }
             }

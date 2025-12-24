@@ -71,11 +71,24 @@ class UnifiedGroupMappingDelegate @AssistedInject constructor(
         chatsMap: Map<String, ChatEntity>,
         participantsMap: Map<String, List<com.bothbubbles.data.local.db.entity.HandleEntity>>
     ): ConversationUiModel? {
-        if (chatGuids.isEmpty()) return null
+        if (chatGuids.isEmpty()) {
+            timber.log.Timber.tag("ConvoDebug").w("Skipping unified chat ${unifiedChat.id.take(12)} - no chatGuids")
+            return null
+        }
 
         // Use pre-fetched chats from batch query
         val chats = chatGuids.mapNotNull { chatsMap[it] }
-        if (chats.isEmpty()) return null
+        if (chats.isEmpty()) {
+            // This is the suspected bug - unified chat exists but no linked chats found in map
+            val isGroup = unifiedChat.sourceId.contains(";chat")
+            if (isGroup) {
+                timber.log.Timber.tag("ConvoDebug").w(
+                    "SKIPPING GROUP unified chat: id=${unifiedChat.id.take(12)}, sourceId=${unifiedChat.sourceId.take(40)}, " +
+                    "chatGuids=$chatGuids, chatsMapSize=${chatsMap.size}"
+                )
+            }
+            return null
+        }
 
         // Use cached latest message from unified chat
         val latestTimestamp = unifiedChat.latestMessageDate ?: 0L

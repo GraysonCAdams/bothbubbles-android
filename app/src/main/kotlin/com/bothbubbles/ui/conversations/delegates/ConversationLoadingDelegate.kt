@@ -97,6 +97,59 @@ class ConversationLoadingDelegate @AssistedInject constructor(
                 val nonGroupChats = chatRepository.getNonGroupChatsPaginated(INITIAL_LOAD_TARGET, 0)
                 PerformanceProfiler.end(queryId3, "${nonGroupChats.size} chats")
 
+                // DEBUG: Trace group chat loading issue - looking for "Squad Goals" and "Siblings"
+                Timber.tag("ConvoDebug").d("=== INITIAL LOAD DEBUG ===")
+                Timber.tag("ConvoDebug").d("Unified chats total: ${unifiedChats.size}")
+
+                // Check for group unified chats (sourceId contains ";chat" for group chats)
+                val groupUnified = unifiedChats.filter { it.sourceId.contains(";chat") }
+                Timber.tag("ConvoDebug").d("Group unified chats: ${groupUnified.size}")
+                groupUnified.forEach { uc ->
+                    Timber.tag("ConvoDebug").d("  GroupUnified: displayName=${uc.displayName}, sourceId=${uc.sourceId.take(40)}, latestMsgDate=${uc.latestMessageDate}")
+                }
+
+                // Look for Squad Goals and Siblings in unified chats by display name
+                val targetNames = listOf("Squad Goals", "Siblings", "squad goals", "siblings")
+                val targetUnified = unifiedChats.filter { uc ->
+                    targetNames.any { name -> uc.displayName?.contains(name, ignoreCase = true) == true }
+                }
+                if (targetUnified.isNotEmpty()) {
+                    Timber.tag("ConvoDebug").d("TARGET FOUND in unified: ${targetUnified.map { "${it.displayName}|${it.sourceId.take(30)}" }}")
+                } else {
+                    Timber.tag("ConvoDebug").d("TARGET NOT in unified chats (Squad Goals/Siblings)")
+                }
+
+                Timber.tag("ConvoDebug").d("Orphan group chats (unified_chat_id IS NULL): ${groupChats.size}")
+                // Look for Squad Goals and Siblings in orphan group chats
+                val targetOrphans = groupChats.filter { gc ->
+                    targetNames.any { name -> gc.displayName?.contains(name, ignoreCase = true) == true }
+                }
+                if (targetOrphans.isNotEmpty()) {
+                    Timber.tag("ConvoDebug").d("TARGET FOUND in orphans: ${targetOrphans.map { "${it.displayName}|${it.guid.take(30)}|unifiedId=${it.unifiedChatId}" }}")
+                } else {
+                    Timber.tag("ConvoDebug").d("TARGET NOT in orphan group chats")
+                }
+
+                // Check chat-to-unified mappings
+                val unifiedChatIds = unifiedChats.map { it.id }
+                if (unifiedChatIds.isNotEmpty()) {
+                    val mapping = chatRepository.getChatGuidsForUnifiedChats(unifiedChatIds)
+                    val totalMappedChats = mapping.values.sumOf { it.size }
+                    Timber.tag("ConvoDebug").d("Chat-to-unified mappings: $totalMappedChats chats linked to ${mapping.size} unified")
+
+                    // Check specifically for group unified chats that have no mappings
+                    val unmappedGroupUnified = groupUnified.filter { uc -> mapping[uc.id].isNullOrEmpty() }
+                    if (unmappedGroupUnified.isNotEmpty()) {
+                        Timber.tag("ConvoDebug").d("WARNING: ${unmappedGroupUnified.size} group unified chats have NO linked chats!")
+                        unmappedGroupUnified.forEach { uc ->
+                            Timber.tag("ConvoDebug").d("  Orphaned unified: displayName=${uc.displayName}, id=${uc.id.take(12)}, sourceId=${uc.sourceId.take(40)}")
+                        }
+                    }
+                }
+
+                Timber.tag("ConvoDebug").d("Non-group chats: ${nonGroupChats.size}")
+                Timber.tag("ConvoDebug").d("=== END DEBUG ===")
+
                 val buildId = PerformanceProfiler.start("ConversationList.build")
                 val allConversations = buildConversationList(
                     unifiedChats = unifiedChats,
@@ -107,6 +160,25 @@ class ConversationLoadingDelegate @AssistedInject constructor(
                 // Take only the first INITIAL_LOAD_TARGET for initial display
                 val conversations = allConversations.take(INITIAL_LOAD_TARGET)
                 PerformanceProfiler.end(buildId, "${conversations.size} items")
+
+                // Check if Squad Goals / Siblings made it into the final list
+                val targetInFinal = conversations.filter { conv ->
+                    conv.displayName.contains("Squad", ignoreCase = true) ||
+                    conv.displayName.contains("Siblings", ignoreCase = true)
+                }
+                if (targetInFinal.isNotEmpty()) {
+                    Timber.tag("ConvoDebug").w("TARGET IN FINAL LIST: ${targetInFinal.map { "${it.displayName}|isGroup=${it.isGroup}|guid=${it.guid.take(30)}" }}")
+                } else {
+                    Timber.tag("ConvoDebug").w("TARGET NOT IN FINAL LIST - total convos: ${conversations.size}, allConvos: ${allConversations.size}")
+                    // Check if they're in allConversations but got cut off
+                    val targetInAll = allConversations.filter { conv ->
+                        conv.displayName.contains("Squad", ignoreCase = true) ||
+                        conv.displayName.contains("Siblings", ignoreCase = true)
+                    }
+                    if (targetInAll.isNotEmpty()) {
+                        Timber.tag("ConvoDebug").w("TARGET IN ALL (but cut off): ${targetInAll.map { "${it.displayName}|pos=${allConversations.indexOf(it)}" }}")
+                    }
+                }
 
                 // Check if more data exists beyond what we're showing
                 val totalUnified = unifiedChatRepository.getActiveCount()

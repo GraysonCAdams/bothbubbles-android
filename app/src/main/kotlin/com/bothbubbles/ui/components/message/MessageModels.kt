@@ -144,7 +144,8 @@ data class ReplyPreviewData(
 data class ThreadChain(
     val originGuid: String,                  // GUID of the thread origin (needed for replying)
     val originMessage: MessageUiModel?,      // The root message being replied to (null if excluded/deleted)
-    val replies: StableList<MessageUiModel>        // All replies in chronological order
+    val replies: StableList<MessageUiModel>,       // All replies in chronological order
+    val reactions: StableList<ReactionUiModel> = emptyList<ReactionUiModel>().toStable() // Reactions on the origin message (for Reels context)
 )
 
 /**

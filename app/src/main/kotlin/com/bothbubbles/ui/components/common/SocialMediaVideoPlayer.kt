@@ -50,6 +50,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -133,7 +134,11 @@ fun SocialMediaVideoPlayer(
     onOpenReelsFeed: (() -> Unit)? = null,
     onLongPress: (() -> Unit)? = null,
     swipeProgress: Float = 0f,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    // When true, "Show Original" link is NOT rendered internally - parent should render it via subtextContent
+    renderSubtextExternally: Boolean = false,
+    // Content to render as subtext (outside bubble for avatar alignment)
+    subtextContent: (@Composable () -> Unit)? = null
 ) {
     var state by remember { mutableStateOf<SocialMediaVideoState>(SocialMediaVideoState.Idle) }
     var downloadProgress by remember { mutableFloatStateOf(0f) }
@@ -347,7 +352,8 @@ fun SocialMediaVideoPlayer(
 
         // "Show Original" link - outside Surface with no background, aligned to message side
         // Fades out during swipe-to-reveal gesture
-        if (state !is SocialMediaVideoState.Dismissed && state !is SocialMediaVideoState.Idle) {
+        val shouldShowSubtext = state !is SocialMediaVideoState.Dismissed && state !is SocialMediaVideoState.Idle
+        if (shouldShowSubtext && !renderSubtextExternally) {
             Text(
                 text = "Show Original",
                 style = MaterialTheme.typography.labelSmall,
@@ -366,7 +372,38 @@ fun SocialMediaVideoPlayer(
                     )
             )
         }
+
+        // Render external subtext content if provided (for avatar alignment fix)
+        if (renderSubtextExternally && subtextContent != null) {
+            subtextContent()
+        }
     }
+}
+
+/**
+ * Composable for rendering "Show Original" link as subtext.
+ * Used when rendering externally for proper avatar alignment.
+ */
+@Composable
+fun ShowOriginalSubtext(
+    isFromMe: Boolean,
+    swipeProgress: Float,
+    onShowOriginal: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Text(
+        text = "Show Original",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = modifier
+            .alpha(1f - swipeProgress)
+            .clickable { onShowOriginal() }
+            .padding(
+                start = if (isFromMe) 0.dp else 12.dp,
+                end = if (isFromMe) 12.dp else 0.dp,
+                top = 4.dp
+            )
+    )
 }
 
 private suspend fun retryFetch(

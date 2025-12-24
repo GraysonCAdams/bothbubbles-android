@@ -338,16 +338,6 @@ class MessageRepository @Inject constructor(
 
             val allMessages = body.data.orEmpty().map { it.toEntity(chatGuid) }
 
-            // [DICTATION_DEBUG] Log what the API returned
-            if (allMessages.isNotEmpty()) {
-                val msgInfo = allMessages.take(3).joinToString {
-                    "guid=${it.guid.takeLast(8)},date=${it.dateCreated}"
-                }
-                Timber.tag("DICTATION_DEBUG").d(
-                    "syncMessagesForChat API returned ${allMessages.size} msgs (after=$after): $msgInfo"
-                )
-            }
-
             // Filter out tombstoned messages (user deleted, should not resurrect)
             val tombstonedGuids = tombstoneDao.findTombstoned(allMessages.map { it.guid })
             val messages = if (tombstonedGuids.isEmpty()) {
@@ -393,10 +383,24 @@ class MessageRepository @Inject constructor(
             if (messages.isNotEmpty()) {
                 val oldestTimestamp = messages.minOf { it.dateCreated }
                 val newestTimestamp = messages.maxOf { it.dateCreated }
+                Timber.d("Sync for $chatGuid: ${messages.size} messages, recording range $oldestTimestamp-$newestTimestamp")
                 syncRangeTracker.recordSyncedRange(
                     chatGuid = chatGuid,
                     startTimestamp = oldestTimestamp,
                     endTimestamp = newestTimestamp,
+                    source = syncSource
+                )
+            } else if (syncSource == SyncSource.REPAIR) {
+                // For REPAIR sync with no messages found, record a marker sync range
+                // to prevent the chat from being flagged as needing repair again.
+                // Use the chat's latestMessageDate as the marker timestamp.
+                val chat = chatDao.getChatByGuid(chatGuid)
+                val markerTimestamp = chat?.latestMessageDate ?: System.currentTimeMillis()
+                Timber.d("REPAIR sync found 0 messages for $chatGuid, recording marker range at $markerTimestamp")
+                syncRangeTracker.recordSyncedRange(
+                    chatGuid = chatGuid,
+                    startTimestamp = markerTimestamp,
+                    endTimestamp = markerTimestamp,
                     source = syncSource
                 )
             }
@@ -489,8 +493,9 @@ class MessageRepository @Inject constructor(
                 }
             }
 
-            // Filter out tombstoned messages (user deleted, should not resurrect)
             val allGuids = messagesWithChats.map { it.second.guid }
+
+            // Filter out tombstoned messages (user deleted, should not resurrect)
             val tombstonedGuids = tombstoneDao.findTombstoned(allGuids)
             val filteredMessagesWithChats = if (tombstonedGuids.isEmpty()) {
                 messagesWithChats

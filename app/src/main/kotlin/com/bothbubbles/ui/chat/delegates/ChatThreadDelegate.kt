@@ -7,6 +7,8 @@ import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.ui.chat.MessageTransformationUtils.normalizeAddress
 import com.bothbubbles.ui.chat.MessageTransformationUtils.toUiModel
 import com.bothbubbles.ui.chat.state.ThreadState
+import com.bothbubbles.ui.components.message.ReactionUiModel
+import com.bothbubbles.ui.components.message.Tapback
 import com.bothbubbles.ui.components.message.ThreadChain
 import com.bothbubbles.ui.util.toStable
 import dagger.assisted.Assisted
@@ -99,6 +101,27 @@ class ChatThreadDelegate @AssistedInject constructor(
                 !isPlacedSticker
             }
 
+            // Get origin reactions for the header (used when excludeOrigin is true, e.g., Reels context)
+            val originReactions = if (excludeOrigin && origin != null) {
+                reactionsByMessage[origin.guid].orEmpty().mapNotNull { reaction ->
+                    val tapback = Tapback.fromApiName(reaction.associatedMessageType ?: "") ?: return@mapNotNull null
+                    val isFromMe = reaction.isFromMe
+                    val senderAddress = reaction.senderAddress?.let { normalizeAddress(it) }
+                    val senderName = when {
+                        isFromMe -> "You"
+                        senderAddress != null -> addressToName[senderAddress] ?: senderAddress
+                        else -> "Unknown"
+                    }
+                    ReactionUiModel(
+                        tapback = tapback,
+                        isFromMe = isFromMe,
+                        senderName = senderName
+                    )
+                }.toStable()
+            } else {
+                emptyList<ReactionUiModel>().toStable()
+            }
+
             val threadChain = ThreadChain(
                 originGuid = originGuid,
                 originMessage = if (excludeOrigin) null else origin?.toUiModel(
@@ -116,7 +139,8 @@ class ChatThreadDelegate @AssistedInject constructor(
                         addressToName = addressToName,
                         addressToAvatarPath = addressToAvatarPath
                     )
-                }.toStable()
+                }.toStable(),
+                reactions = originReactions
             )
             _state.update { it.copy(threadOverlay = threadChain) }
         }

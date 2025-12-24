@@ -8,6 +8,7 @@ import com.bothbubbles.data.repository.HandleRepository
 import com.bothbubbles.di.IoDispatcher
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.security.MessageDigest
@@ -33,16 +34,29 @@ class SocialMediaLinkMigrationHelper @Inject constructor(
     private val socialMediaLinkDao: SocialMediaLinkDao,
     private val handleRepository: HandleRepository,
     private val cacheManager: SocialMediaCacheManager,
+    private val syncPreferences: com.bothbubbles.core.data.prefs.SyncPreferences,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
     companion object {
         private const val PREFS_NAME = "social_media_link_migration"
-        private const val KEY_MIGRATION_COMPLETED = "migration_completed_v1"
+        // Bumped to v2 to re-run migration for users who hit the timing bug
+        // where migration marked complete before initial sync finished
+        private const val KEY_MIGRATION_COMPLETED = "migration_completed_v2"
         private const val KEY_METADATA_REPAIR_COMPLETED = "metadata_repair_completed_v1"
+        private const val KEY_OUTGOING_MIGRATION_COMPLETED = "outgoing_migration_completed_v1"
+        private const val KEY_POST_CLEANUP_COMPLETED = "post_cleanup_completed_v1"
 
-        // Instagram URL patterns
+        // Migrate messages from the last 7 days for recently sent links
+        private const val RECENT_MESSAGE_THRESHOLD_MS = 7L * 24 * 60 * 60 * 1000
+
+        // Pattern to detect Instagram post URLs (/p/) that should be removed
+        private val INSTAGRAM_POST_PATTERN = Regex(
+            """instagram\.com/(?:p|share/p)/[A-Za-z0-9_-]+"""
+        )
+
+        // Instagram URL patterns - reels only, not posts (/p/)
         private val INSTAGRAM_PATTERN = Regex(
-            """https?://(?:www\.)?instagram\.com/(?:reel|reels|p|share/reel|share/p)/[A-Za-z0-9_-]+[^\s]*"""
+            """https?://(?:www\.)?instagram\.com/(?:reel|reels|share/reel)/[A-Za-z0-9_-]+[^\s]*"""
         )
 
         // TikTok URL patterns
@@ -83,6 +97,28 @@ class SocialMediaLinkMigrationHelper @Inject constructor(
                 }
             }
 
+            // Migrate recently sent outgoing messages (fix for messages sent after initial migration)
+            if (!prefs.getBoolean(KEY_OUTGOING_MIGRATION_COMPLETED, false)) {
+                try {
+                    migrateRecentOutgoingLinks()
+                    prefs.edit().putBoolean(KEY_OUTGOING_MIGRATION_COMPLETED, true).apply()
+                    Timber.i("[SocialMediaMigration] Outgoing link migration completed successfully")
+                } catch (e: Exception) {
+                    Timber.e(e, "[SocialMediaMigration] Outgoing link migration failed")
+                }
+            }
+
+            // Clean up Instagram post (/p/) URLs - we only support reels now
+            if (!prefs.getBoolean(KEY_POST_CLEANUP_COMPLETED, false)) {
+                try {
+                    cleanupInstagramPosts()
+                    prefs.edit().putBoolean(KEY_POST_CLEANUP_COMPLETED, true).apply()
+                    Timber.i("[SocialMediaMigration] Instagram post cleanup completed successfully")
+                } catch (e: Exception) {
+                    Timber.e(e, "[SocialMediaMigration] Instagram post cleanup failed")
+                }
+            }
+
             // Always deduplicate cache to clean up any duplicate entries
             // (from before we normalized URLs before hashing)
             try {
@@ -97,29 +133,126 @@ class SocialMediaLinkMigrationHelper @Inject constructor(
     }
 
     /**
+     * Remove Instagram post (/p/) URLs from the social_media_links table.
+     * We only support reels now, not regular posts.
+     */
+    private suspend fun cleanupInstagramPosts() {
+        Timber.d("[SocialMediaMigration] Cleaning up Instagram post URLs (/p/)")
+
+        // First, get post URLs so we can clean their cached files
+        val allInstagramLinks = socialMediaLinkDao.getAllInstagramLinks()
+        val postLinks = allInstagramLinks.filter { link ->
+            INSTAGRAM_POST_PATTERN.containsMatchIn(link.url)
+        }
+
+        // Remove cached files for post URLs
+        for (link in postLinks) {
+            try {
+                cacheManager.removeFromCache(link.url)
+            } catch (e: Exception) {
+                Timber.w(e, "[SocialMediaMigration] Failed to remove cached post: ${link.url}")
+            }
+        }
+
+        // Delete all post URLs from database in one query
+        val deletedCount = socialMediaLinkDao.deleteInstagramPosts()
+        Timber.i("[SocialMediaMigration] Removed $deletedCount Instagram post URLs")
+    }
+
+    /**
+     * Migrate recently sent outgoing messages that may have been missed.
+     *
+     * This is a one-time fix for messages sent after the initial migration ran
+     * but before the IMessageSenderStrategy was updated to store social media links.
+     * Scans the last 7 days of sent messages.
+     */
+    private suspend fun migrateRecentOutgoingLinks() {
+        val cutoffTime = System.currentTimeMillis() - RECENT_MESSAGE_THRESHOLD_MS
+        Timber.d("[SocialMediaMigration] Migrating outgoing links from messages after $cutoffTime")
+
+        // Query recent outgoing messages with social media URLs
+        val messages = messageDao.getRecentOutgoingMessagesWithSocialMediaUrls(cutoffTime)
+        Timber.d("[SocialMediaMigration] Found ${messages.size} recent outgoing messages with social media URLs")
+
+        if (messages.isEmpty()) {
+            Timber.d("[SocialMediaMigration] No recent outgoing messages to migrate")
+            return
+        }
+
+        var insertedCount = 0
+        val linksToInsert = mutableListOf<SocialMediaLinkEntity>()
+
+        for (message in messages) {
+            val text = message.text ?: continue
+            val urls = extractSocialMediaUrls(text)
+
+            for (url in urls) {
+                val platform = detectPlatform(url) ?: continue
+                val urlHash = hashUrl(url)
+
+                // Check if link already exists (from initial migration or previous send)
+                if (socialMediaLinkDao.exists(urlHash)) {
+                    continue
+                }
+
+                val link = SocialMediaLinkEntity(
+                    urlHash = urlHash,
+                    url = url,
+                    messageGuid = message.guid,
+                    chatGuid = message.chatGuid,
+                    platform = platform.name,
+                    senderAddress = null, // Outgoing, so no sender address
+                    isFromMe = true,
+                    sentTimestamp = message.dateCreated,
+                    isDownloaded = false,
+                    createdAt = System.currentTimeMillis()
+                )
+
+                linksToInsert.add(link)
+            }
+
+            // Batch insert every 100 links
+            if (linksToInsert.size >= 100) {
+                socialMediaLinkDao.insertAll(linksToInsert)
+                insertedCount += linksToInsert.size
+                linksToInsert.clear()
+            }
+        }
+
+        // Insert remaining
+        if (linksToInsert.isNotEmpty()) {
+            socialMediaLinkDao.insertAll(linksToInsert)
+            insertedCount += linksToInsert.size
+        }
+
+        Timber.i("[SocialMediaMigration] Inserted $insertedCount outgoing social media links")
+    }
+
+    /**
      * Migrate existing messages with social media URLs to the social_media_links table.
      * Filters out reaction messages that quote the URL.
      *
-     * @throws IllegalStateException if no messages exist yet (defers migration until sync completes)
+     * @throws IllegalStateException if initial sync hasn't completed yet (defers migration)
      */
     private suspend fun migrateExistingLinks() {
         Timber.d("[SocialMediaMigration] Starting link migration from existing messages")
+
+        // Check if initial sync has completed - if not, defer migration
+        // This prevents marking migration as "complete" on fresh install before messages sync
+        val initialSyncTimestamp = syncPreferences.initialSyncCompleteTimestamp.first()
+        if (initialSyncTimestamp == 0L) {
+            Timber.d("[SocialMediaMigration] Initial sync not completed yet - deferring migration")
+            throw IllegalStateException("Initial sync not completed, deferring migration")
+        }
 
         // Query messages with social media URLs, excluding reactions
         // Reactions have associated_message_type set (e.g., "love", "like", etc.)
         val messages = messageDao.getMessagesWithSocialMediaUrlsExcludingReactions()
         Timber.d("[SocialMediaMigration] Found ${messages.size} messages with social media URLs (excluding reactions)")
 
-        // If no messages with social URLs found, check if we should defer migration
-        // We defer if there are cached videos but no messages - suggests sync hasn't completed
+        // If no messages with social URLs found, that's fine - nothing to migrate
         if (messages.isEmpty()) {
-            val cachedVideos = cacheManager.getAllCachedVideos()
-            if (cachedVideos.isNotEmpty()) {
-                Timber.d("[SocialMediaMigration] Found ${cachedVideos.size} cached videos but no messages - deferring migration")
-                throw IllegalStateException("Messages not synced yet, deferring migration")
-            }
-            // No cached videos and no messages - nothing to migrate
-            Timber.d("[SocialMediaMigration] No cached videos and no messages - migration complete (nothing to do)")
+            Timber.d("[SocialMediaMigration] No messages with social media URLs - migration complete (nothing to do)")
             return
         }
 

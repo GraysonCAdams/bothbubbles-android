@@ -50,6 +50,8 @@ data class ContactInfo(
     val address: String,  // Phone number or email
     val isGroup: Boolean,
     val participantNames: List<String> = emptyList(),
+    val participantAvatarPaths: List<String?> = emptyList(),  // Avatar paths for group participants
+    val chatAvatarPath: String? = null,  // Custom group photo (takes precedence over participant collage)
     val hasContact: Boolean = false,  // True if this person is a saved contact
     val isStarred: Boolean = false,  // True if this contact is starred (favorite) in Android Contacts
     val hasInferredName: Boolean = false  // True if displayName includes "Maybe:" prefix
@@ -125,25 +127,40 @@ fun ContactQuickActionsPopup(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // Large avatar with expand animation (simulates shared element)
+            // Priority: chatAvatarPath (custom group photo) > GroupAvatar (collage) > Avatar (contact)
             Box(
                 modifier = Modifier
                     .size(120.dp)
                     .scale(avatarScale)
                     .clip(RoundedCornerShape(24.dp))
             ) {
-                if (contactInfo.isGroup) {
-                    GroupAvatar(
-                        names = contactInfo.participantNames.ifEmpty {
-                            listOf(contactInfo.displayName)
-                        },
-                        size = 120.dp
-                    )
-                } else {
-                    Avatar(
-                        name = contactInfo.rawDisplayName,
-                        avatarPath = contactInfo.avatarPath,
-                        size = 120.dp
-                    )
+                when {
+                    // Custom group photo takes precedence
+                    contactInfo.isGroup && contactInfo.chatAvatarPath != null -> {
+                        Avatar(
+                            name = contactInfo.displayName,
+                            avatarPath = contactInfo.chatAvatarPath,
+                            size = 120.dp
+                        )
+                    }
+                    // Group chat without custom photo - show participant collage
+                    contactInfo.isGroup -> {
+                        GroupAvatar(
+                            names = contactInfo.participantNames.ifEmpty {
+                                listOf(contactInfo.displayName)
+                            },
+                            avatarPaths = contactInfo.participantAvatarPaths,
+                            size = 120.dp
+                        )
+                    }
+                    // 1:1 chat - show contact photo
+                    else -> {
+                        Avatar(
+                            name = contactInfo.rawDisplayName,
+                            avatarPath = contactInfo.avatarPath,
+                            size = 120.dp
+                        )
+                    }
                 }
             }
 

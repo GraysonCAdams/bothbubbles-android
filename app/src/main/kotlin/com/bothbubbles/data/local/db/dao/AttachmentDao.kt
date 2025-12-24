@@ -47,6 +47,19 @@ interface AttachmentDao {
     @Query("SELECT * FROM attachments WHERE guid = :guid")
     suspend fun getAttachmentByGuid(guid: String): AttachmentEntity?
 
+    /**
+     * Check if an attachment with the same message and file name already exists.
+     * Used to detect content duplicates when the server sends the same attachment
+     * with different GUIDs (e.g., proper server GUID vs fallback at_0_ format).
+     */
+    @Query("""
+        SELECT * FROM attachments
+        WHERE message_guid = :messageGuid
+        AND transfer_name = :transferName
+        LIMIT 1
+    """)
+    suspend fun getAttachmentByMessageAndName(messageGuid: String, transferName: String): AttachmentEntity?
+
     @Query("""
         SELECT a.* FROM attachments a
         INNER JOIN messages m ON a.message_guid = m.guid
@@ -88,6 +101,10 @@ interface AttachmentDao {
     /**
      * Get video attachments with sender information for Reels feed.
      * Only returns downloaded videos (local_path IS NOT NULL) that are not hidden.
+     *
+     * Note: Joins on sender_address instead of handle_id because handle_id may not
+     * be correctly set on all messages (especially in group chats or after migrations).
+     * Uses a subquery to pick the best matching handle (preferring iMessage over SMS).
      */
     @Query("""
         SELECT
@@ -101,7 +118,12 @@ interface AttachmentDao {
             h.formatted_address
         FROM attachments a
         INNER JOIN messages m ON a.message_guid = m.guid
-        LEFT JOIN handles h ON m.handle_id = h.id
+        LEFT JOIN handles h ON h.id = (
+            SELECT h2.id FROM handles h2
+            WHERE h2.address = m.sender_address
+            ORDER BY CASE h2.service WHEN 'iMessage' THEN 0 ELSE 1 END
+            LIMIT 1
+        )
         WHERE m.chat_guid = :chatGuid
           AND a.mime_type LIKE 'video/%'
           AND a.hide_attachment = 0

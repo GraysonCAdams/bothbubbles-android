@@ -757,6 +757,31 @@ interface MessageDao {
     suspend fun getMessagesWithSocialMediaUrlsForChat(chatGuid: String): List<MessageEntity>
 
     /**
+     * Find recent outgoing messages containing social media URLs.
+     * Used by migration to backfill links for recently sent messages.
+     * Only finds messages sent after the given cutoff timestamp.
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE is_from_me = 1
+        AND date_created >= :cutoffTimestamp
+        AND date_deleted IS NULL
+        AND associated_message_type IS NULL
+        AND (
+            text LIKE '%instagram.com/reel/%'
+            OR text LIKE '%instagram.com/p/%'
+            OR text LIKE '%instagram.com/reels/%'
+            OR text LIKE '%instagram.com/share/reel/%'
+            OR text LIKE '%instagram.com/share/p/%'
+            OR text LIKE '%tiktok.com/%/video/%'
+            OR text LIKE '%vm.tiktok.com/%'
+            OR text LIKE '%vt.tiktok.com/%'
+        )
+        ORDER BY date_created DESC
+    """)
+    suspend fun getRecentOutgoingMessagesWithSocialMediaUrls(cutoffTimestamp: Long): List<MessageEntity>
+
+    /**
      * Find a matching message by content and timestamp within a tolerance window.
      * Used to detect duplicate SMS/MMS messages that may have different GUIDs.
      * Handles NULL text properly (for attachment-only messages).

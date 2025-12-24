@@ -2,7 +2,6 @@ package com.bothbubbles.core.model.entity
 
 import androidx.room.ColumnInfo
 import androidx.room.Entity
-import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
@@ -26,15 +25,11 @@ import androidx.room.PrimaryKey
     indices = [
         Index(value = ["chat_guid"]),
         Index(value = ["chat_guid", "start_timestamp", "end_timestamp"])
-    ],
-    foreignKeys = [
-        ForeignKey(
-            entity = ChatEntity::class,
-            parentColumns = ["guid"],
-            childColumns = ["chat_guid"],
-            onDelete = ForeignKey.CASCADE
-        )
     ]
+    // NOTE: Foreign key removed in migration 60→61 because OnConflictStrategy.REPLACE
+    // on chat inserts triggers CASCADE delete, wiping sync_ranges on every app restart.
+    // Sync ranges are orphan-safe - they reference chats by string GUID and are cleaned
+    // up separately when chats are deleted.
 )
 data class SyncRangeEntity(
     @PrimaryKey(autoGenerate = true)

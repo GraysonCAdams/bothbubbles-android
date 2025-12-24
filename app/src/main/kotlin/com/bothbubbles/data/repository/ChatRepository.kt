@@ -42,6 +42,12 @@ class ChatRepository @Inject constructor(
 
     fun observeChat(guid: String): Flow<ChatEntity?> = chatDao.observeChatByGuid(guid)
 
+    /**
+     * Observe the unified chat entity for a given chat GUID.
+     * Returns the UnifiedChatEntity that contains this chat as its source.
+     */
+    fun observeUnifiedChatForChat(chatGuid: String) = unifiedChatDao.observeBySourceId(chatGuid)
+
     suspend fun getChat(guid: String): ChatEntity? = chatDao.getChatByGuid(guid)
 
     suspend fun getChatsByGuids(guids: List<String>): List<ChatEntity> = chatDao.getChatsByGuids(guids)

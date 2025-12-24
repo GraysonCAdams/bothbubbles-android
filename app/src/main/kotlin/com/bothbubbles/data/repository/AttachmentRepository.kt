@@ -279,6 +279,20 @@ class AttachmentRepository @Inject constructor(
                 return@forEach
             }
 
+            // Check for content-based duplicate: same message + same file name
+            // This catches cases where the server sends the same attachment with different GUIDs
+            // (e.g., proper server GUID "09029F3C-..." vs fallback "at_0_<messageGuid>")
+            val transferName = attachmentDto.transferName
+            if (transferName != null) {
+                val contentDuplicate = attachmentDao.getAttachmentByMessageAndName(messageDto.guid, transferName)
+                if (contentDuplicate != null) {
+                    Timber.d("[AttachmentSync] syncAttachmentsFromDto: content duplicate detected " +
+                        "(existingGuid=${contentDuplicate.guid}, newGuid=${attachmentDto.guid}, " +
+                        "transferName=$transferName), skipping")
+                    return@forEach
+                }
+            }
+
             // Determine transfer state based on direction:
             // - Outbound (isOutgoing=true): Already uploaded, mark as UPLOADED
             // - Inbound: Needs download, mark as PENDING for auto-download

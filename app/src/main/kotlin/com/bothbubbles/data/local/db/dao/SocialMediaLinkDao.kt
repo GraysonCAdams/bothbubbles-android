@@ -63,6 +63,18 @@ interface SocialMediaLinkDao {
     suspend fun getPendingLinksForChat(chatGuid: String): List<SocialMediaLinkEntity>
 
     /**
+     * Get pending (not downloaded) links for multiple chats (merged chats).
+     * Used to show pending videos in the Reels feed for unified chat views.
+     */
+    @Query("""
+        SELECT * FROM social_media_links
+        WHERE chat_guid IN (:chatGuids)
+        AND is_downloaded = 0
+        ORDER BY sent_timestamp DESC
+    """)
+    suspend fun getPendingLinksForChats(chatGuids: List<String>): List<SocialMediaLinkEntity>
+
+    /**
      * Get pending links across all chats for auto-caching.
      * Limited to avoid overwhelming the download queue.
      */
@@ -79,6 +91,12 @@ interface SocialMediaLinkDao {
      */
     @Query("SELECT * FROM social_media_links WHERE url_hash = :urlHash")
     suspend fun getByUrlHash(urlHash: String): SocialMediaLinkEntity?
+
+    /**
+     * Get a link by original URL.
+     */
+    @Query("SELECT * FROM social_media_links WHERE url = :url LIMIT 1")
+    suspend fun getByUrl(url: String): SocialMediaLinkEntity?
 
     /**
      * Get a link by message GUID.
@@ -188,4 +206,18 @@ interface SocialMediaLinkDao {
      */
     @Query("DELETE FROM social_media_links")
     suspend fun deleteAll()
+
+    /**
+     * Delete Instagram post URLs (those containing /p/ or /share/p/).
+     * Used by migration to clean up non-reel URLs since we only support reels now.
+     * @return Number of rows deleted
+     */
+    @Query("DELETE FROM social_media_links WHERE platform = 'INSTAGRAM' AND (url LIKE '%/p/%' OR url LIKE '%/share/p/%')")
+    suspend fun deleteInstagramPosts(): Int
+
+    /**
+     * Get all Instagram links (for migration/cleanup purposes).
+     */
+    @Query("SELECT * FROM social_media_links WHERE platform = 'INSTAGRAM'")
+    suspend fun getAllInstagramLinks(): List<SocialMediaLinkEntity>
 }

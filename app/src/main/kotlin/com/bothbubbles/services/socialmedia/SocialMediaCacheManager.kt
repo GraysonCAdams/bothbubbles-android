@@ -6,8 +6,11 @@ import com.bothbubbles.data.local.db.dao.SocialMediaLinkDao
 import com.bothbubbles.di.IoDispatcher
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -52,10 +55,27 @@ data class CachedVideo(
 )
 
 /**
+ * Event emitted when a video is cached or removed.
+ * Used to notify observers (like ChatReelsDelegate) to refresh their state.
+ */
+data class VideoCacheEvent(
+    val originalUrl: String,
+    val chatGuid: String?,
+    val eventType: CacheEventType
+)
+
+enum class CacheEventType {
+    ADDED,
+    REMOVED
+}
+
+/**
  * Interface for managing social media video caching.
  * Allows for dependency injection and testing.
  */
 interface SocialMediaCacher {
+    /** Flow of cache events for observing cache changes. */
+    val cacheEvents: SharedFlow<VideoCacheEvent>
     /** Gets the local cached file path for a video URL, or null if not cached. */
     suspend fun getCachedPath(originalUrl: String): String?
 
@@ -68,8 +88,23 @@ interface SocialMediaCacher {
     /** Gets cached videos for a specific chat, with viewed status populated. */
     suspend fun getCachedVideosForChat(chatGuid: String): List<CachedVideo>
 
+    /** Gets cached videos for multiple chats (merged chats), with viewed status populated. */
+    suspend fun getCachedVideosForChats(chatGuids: List<String>): List<CachedVideo>
+
     /** Removes duplicate cache entries for the same video. Returns count removed. */
     suspend fun deduplicateCache(): Int
+
+    /** Updates metadata for a cached video. Used to repair broken metadata. */
+    fun updateCachedVideoMetadata(
+        originalUrl: String,
+        chatGuid: String?,
+        senderName: String?,
+        senderAddress: String?,
+        sentTimestamp: Long
+    )
+
+    /** Gets all cached videos with empty/missing chatGuid (for repair). */
+    suspend fun getCachedVideosWithEmptyChatGuid(): List<CachedVideo>
 
     /** Marks a video as viewed in the Reels feed. */
     fun markVideoAsViewed(originalUrl: String)
@@ -148,6 +183,10 @@ class SocialMediaCacheManager @Inject constructor(
 
     // Active download progress streams
     private val downloadProgressMap = ConcurrentHashMap<String, MutableStateFlow<DownloadProgress>>()
+
+    // SharedFlow for cache change events
+    private val _cacheEvents = MutableSharedFlow<VideoCacheEvent>(extraBufferCapacity = 10)
+    override val cacheEvents: SharedFlow<VideoCacheEvent> = _cacheEvents.asSharedFlow()
 
     // SharedPreferences for persisting viewed status
     private val viewedPrefs by lazy {
@@ -270,11 +309,12 @@ class SocialMediaCacheManager @Inject constructor(
 
     /**
      * Extract social media URLs from text.
+     * Note: For Instagram, we only extract /reel/ and /reels/ URLs, not /p/ (posts).
      */
     private fun extractSocialMediaUrls(text: String): List<String> {
         val urls = mutableListOf<String>()
-        // Instagram patterns
-        val instagramPattern = Regex("""https?://(?:www\.)?instagram\.com/(?:reel|reels|p)/[A-Za-z0-9_-]+[^\s]*""")
+        // Instagram patterns - reels only, not posts (/p/)
+        val instagramPattern = Regex("""https?://(?:www\.)?instagram\.com/(?:reel|reels)/[A-Za-z0-9_-]+[^\s]*""")
         urls.addAll(instagramPattern.findAll(text).map { it.value })
 
         // TikTok patterns
@@ -389,6 +429,46 @@ class SocialMediaCacheManager @Inject constructor(
      */
     override suspend fun getCachedVideosForChat(chatGuid: String): List<CachedVideo> = withContext(ioDispatcher) {
         getAllCachedVideos().filter { it.chatGuid == chatGuid }
+    }
+
+    /**
+     * Gets cached videos for multiple chats (merged chats), with viewed status populated.
+     */
+    override suspend fun getCachedVideosForChats(chatGuids: List<String>): List<CachedVideo> = withContext(ioDispatcher) {
+        val guidSet = chatGuids.toSet()
+        getAllCachedVideos().filter { it.chatGuid in guidSet }
+    }
+
+    /**
+     * Gets cached videos with empty/missing chatGuid (for metadata repair).
+     */
+    override suspend fun getCachedVideosWithEmptyChatGuid(): List<CachedVideo> = withContext(ioDispatcher) {
+        getAllCachedVideos().filter { it.chatGuid.isNullOrEmpty() }
+    }
+
+    /**
+     * Updates metadata for a cached video. Used to repair broken metadata.
+     */
+    override fun updateCachedVideoMetadata(
+        originalUrl: String,
+        chatGuid: String?,
+        senderName: String?,
+        senderAddress: String?,
+        sentTimestamp: Long
+    ) {
+        val hash = hashUrl(originalUrl)
+        val existing = videoMetadataCache[hash] ?: return
+
+        val updated = existing.copy(
+            chatGuid = chatGuid ?: existing.chatGuid,
+            senderName = senderName ?: existing.senderName,
+            senderAddress = senderAddress ?: existing.senderAddress,
+            sentTimestamp = if (sentTimestamp > 0) sentTimestamp else existing.sentTimestamp
+        )
+
+        videoMetadataCache[hash] = updated
+        persistMetadata(hash, updated)
+        Timber.d("[SocialMediaCache] Updated metadata for ${originalUrl}: chatGuid=$chatGuid, sender=$senderName")
     }
 
     /**
@@ -570,6 +650,15 @@ class SocialMediaCacheManager @Inject constructor(
                         isComplete = true
                     )
 
+                    // Notify observers that a new video was cached
+                    _cacheEvents.tryEmit(
+                        VideoCacheEvent(
+                            originalUrl = originalUrl,
+                            chatGuid = chatGuid,
+                            eventType = CacheEventType.ADDED
+                        )
+                    )
+
                     // Clean up old cache if needed
                     cleanupCacheIfNeeded()
                 }
@@ -636,6 +725,10 @@ class SocialMediaCacheManager @Inject constructor(
     override suspend fun removeFromCache(originalUrl: String): Boolean = withContext(ioDispatcher) {
         val hash = hashUrl(originalUrl)
         val file = File(cacheDir, "$hash$VIDEO_EXTENSION")
+
+        // Get chatGuid before removing metadata (for event emission)
+        val chatGuid = videoMetadataCache[hash]?.chatGuid
+
         videoMetadataCache.remove(hash)
         removePersistedMetadata(hash)
         // Clean up viewed status prefs
@@ -651,7 +744,20 @@ class SocialMediaCacheManager @Inject constructor(
             Timber.w(e, "Failed to mark link as not downloaded: $originalUrl")
         }
 
-        file.delete()
+        val deleted = file.delete()
+
+        // Notify observers that a video was removed
+        if (deleted) {
+            _cacheEvents.tryEmit(
+                VideoCacheEvent(
+                    originalUrl = originalUrl,
+                    chatGuid = chatGuid,
+                    eventType = CacheEventType.REMOVED
+                )
+            )
+        }
+
+        deleted
     }
 
     /**

@@ -29,8 +29,14 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.semantics
+import com.bothbubbles.ui.components.common.Avatar
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -133,7 +139,12 @@ internal fun SimpleBubbleContent(
     // Inline reply quote support
     replyPreview: ReplyPreviewData? = null,
     onReplyQuoteTap: (() -> Unit)? = null,
-    onReplyQuoteLongPress: (() -> Unit)? = null
+    onReplyQuoteLongPress: (() -> Unit)? = null,
+    // Avatar props - rendered inside this component for proper alignment with bubble (not subtext)
+    shouldShowAvatarSpace: Boolean = false,
+    showAvatar: Boolean = false,
+    avatarSize: Dp = 28.dp,
+    onAvatarClick: (() -> Unit)? = null
 ) {
     val bubbleColors = BothBubblesTheme.bubbleColors
     val isIMessage = message.messageSource == MessageSource.IMESSAGE.name
@@ -414,13 +425,50 @@ internal fun SimpleBubbleContent(
             horizontalArrangement = if (message.isFromMe) Arrangement.End else Arrangement.Start,
             verticalAlignment = Alignment.Top
         ) {
+            // Outer column that contains avatar+bubble row and subtext
             Column(
-                horizontalAlignment = if (message.isFromMe) Alignment.End else Alignment.Start,
-                modifier = Modifier
-                    .widthIn(max = 240.dp)
-                    .graphicsLayer { clip = false }
-                    .onSizeChanged { size -> bubbleWidthPx = size.width }
+                horizontalAlignment = if (message.isFromMe) Alignment.End else Alignment.Start
             ) {
+                // Inner row for avatar + bubble with bottom alignment
+                // This ensures avatar aligns with bubble bottom, not with subtext
+                Row(
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    // Avatar space for received messages in group chats
+                    if (shouldShowAvatarSpace) {
+                        if (showAvatar) {
+                            Avatar(
+                                name = message.senderName ?: "?",
+                                avatarPath = message.senderAvatarPath,
+                                size = avatarSize,
+                                modifier = Modifier
+                                    .padding(end = 8.dp)
+                                    .then(
+                                        if (onAvatarClick != null) {
+                                            Modifier
+                                                .clickable(onClick = onAvatarClick)
+                                                .semantics {
+                                                    onClick(label = "View ${message.senderName ?: "sender"} contact details") { true }
+                                                }
+                                        } else {
+                                            Modifier
+                                        }
+                                    )
+                            )
+                        } else {
+                            // Empty space to maintain alignment
+                            Spacer(modifier = Modifier.width(avatarSize + 8.dp))
+                        }
+                    }
+
+                    // Bubble content column (no subtext - that goes outside this row)
+                    Column(
+                        horizontalAlignment = if (message.isFromMe) Alignment.End else Alignment.Start,
+                        modifier = Modifier
+                            .widthIn(max = 240.dp)
+                            .graphicsLayer { clip = false }
+                            .onSizeChanged { size -> bubbleWidthPx = size.width }
+                    ) {
                 // Check for large emoji messages (1-3 emojis only) - need to compute before Surface
                 val displayTextForEmoji = if (firstUrl != null && !message.text.isNullOrBlank()) {
                     message.text.replace(firstUrl.matchedText, "").trim()
@@ -818,6 +866,12 @@ internal fun SimpleBubbleContent(
                     )
                 }
             }
+                    } // Close inner Column (bubble content)
+                } // Close inner Row (avatar + bubble)
+
+                // Subtext elements - outside the avatar row so avatar aligns with bubble, not subtext
+                // Calculate start padding to align with bubble when avatar space is present
+                val subtextStartPadding = if (shouldShowAvatarSpace) avatarSize + 8.dp else 0.dp
 
             // Tap-to-reveal timestamp and message type below the bubble
             AnimatedVisibility(
@@ -831,7 +885,7 @@ internal fun SimpleBubbleContent(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier
                         .padding(
-                            start = if (message.isFromMe) 0.dp else 12.dp,
+                            start = if (message.isFromMe) 0.dp else (12.dp + subtextStartPadding),
                             end = if (message.isFromMe) 12.dp else 0.dp,
                             top = 2.dp
                         )

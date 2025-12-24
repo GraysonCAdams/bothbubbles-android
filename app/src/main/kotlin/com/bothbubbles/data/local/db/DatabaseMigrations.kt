@@ -1721,6 +1721,62 @@ object DatabaseMigrations {
     }
 
     /**
+     * Migration 60→61: Remove foreign key from sync_ranges table.
+     *
+     * ROOT CAUSE FIX: The sync_ranges table had a foreign key to chats with CASCADE delete.
+     * When ChatUpdateDao.insertChat() uses OnConflictStrategy.REPLACE, it deletes the existing
+     * chat row before inserting the new one. This triggers the CASCADE delete, wiping all
+     * sync_ranges for that chat.
+     *
+     * The result was that on every app restart:
+     * 1. Chat sync REPLACEs all chats → CASCADE deletes all sync_ranges
+     * 2. findChatsNeedingRepair() finds chats with latestMessageDate but no sync_ranges
+     * 3. Repair sync downloads ~30 messages for those chats
+     * 4. Next restart: repeat
+     *
+     * The fix removes the foreign key. Sync ranges are orphan-safe because:
+     * - They reference chats by string GUID, not by Room ID
+     * - Orphaned sync ranges are harmless (just a few KB of stale data)
+     * - When a chat is explicitly deleted, we can clean up its sync ranges separately
+     */
+    val MIGRATION_60_61 = object : Migration(60, 61) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            Timber.i("Starting migration 60→61: Remove foreign key from sync_ranges")
+
+            // Create new table without foreign key
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS sync_ranges_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    chat_guid TEXT NOT NULL,
+                    start_timestamp INTEGER NOT NULL,
+                    end_timestamp INTEGER NOT NULL,
+                    synced_at INTEGER NOT NULL,
+                    sync_source TEXT NOT NULL
+                )
+            """.trimIndent())
+
+            // Copy existing data
+            db.execSQL("""
+                INSERT INTO sync_ranges_new (id, chat_guid, start_timestamp, end_timestamp, synced_at, sync_source)
+                SELECT id, chat_guid, start_timestamp, end_timestamp, synced_at, sync_source
+                FROM sync_ranges
+            """.trimIndent())
+
+            // Drop old table with foreign key
+            db.execSQL("DROP TABLE sync_ranges")
+
+            // Rename new table
+            db.execSQL("ALTER TABLE sync_ranges_new RENAME TO sync_ranges")
+
+            // Recreate indexes
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_sync_ranges_chat_guid ON sync_ranges(chat_guid)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_sync_ranges_chat_guid_timestamps ON sync_ranges(chat_guid, start_timestamp, end_timestamp)")
+
+            Timber.i("Migration 60→61 complete: Foreign key removed from sync_ranges")
+        }
+    }
+
+    /**
      * List of all migrations for use with databaseBuilder.
      *
      * IMPORTANT: Always add new migrations to this array!
@@ -1785,6 +1841,7 @@ object DatabaseMigrations {
         MIGRATION_56_57,
         MIGRATION_57_58,
         MIGRATION_58_59,
-        MIGRATION_59_60
+        MIGRATION_59_60,
+        MIGRATION_60_61
     )
 }

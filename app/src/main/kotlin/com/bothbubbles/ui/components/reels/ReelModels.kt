@@ -85,6 +85,8 @@ data class ReelItem(
     val pendingSenderAddress: String? = null,
     /** Timestamp when the message was sent */
     val pendingSentTimestamp: Long = 0L,
+    /** Whether this pending video has been viewed in Reels */
+    val pendingViewedInReels: Boolean = false,
 
     // === Common fields ===
     /** Current tapback reaction on this reel, if any */
@@ -137,11 +139,20 @@ data class ReelItem(
     /** Sent timestamp, from either source */
     val sentTimestamp: Long get() = cachedVideo?.sentTimestamp ?: attachmentVideo?.sentTimestamp ?: pendingSentTimestamp
 
-    /** Whether this video has been viewed in the Reels feed */
-    val isViewed: Boolean get() = cachedVideo?.viewedInReels ?: attachmentVideo?.viewedInReels ?: false
-
     /** Whether this was sent by the current user */
-    val isFromMe: Boolean get() = attachmentVideo?.isFromMe ?: false
+    val isFromMe: Boolean get() = when {
+        attachmentVideo != null -> attachmentVideo.isFromMe
+        // For social media videos, check if sender is "You" (set in IncomingMessageHandler/IMessageSenderStrategy)
+        cachedVideo != null -> cachedVideo.senderName == "You"
+        pendingSenderName != null -> pendingSenderName == "You"
+        else -> false
+    }
+
+    /**
+     * Whether this video has been viewed in the Reels feed.
+     * Sent items (isFromMe) are always considered viewed since you know what you sent.
+     */
+    val isViewed: Boolean get() = isFromMe || cachedVideo?.viewedInReels ?: attachmentVideo?.viewedInReels ?: pendingViewedInReels
 
     /** Thumbnail path for preview (attachments only) */
     val thumbnailPath: String? get() = attachmentVideo?.thumbnailPath
@@ -217,7 +228,8 @@ data class ReelItem(
             senderName: String? = null,
             senderAddress: String? = null,
             sentTimestamp: Long = 0L,
-            avatarPath: String? = null
+            avatarPath: String? = null,
+            viewedInReels: Boolean = false
         ): ReelItem {
             return ReelItem(
                 pendingUrl = url,
@@ -227,6 +239,7 @@ data class ReelItem(
                 pendingSenderName = senderName,
                 pendingSenderAddress = senderAddress,
                 pendingSentTimestamp = sentTimestamp,
+                pendingViewedInReels = viewedInReels,
                 avatarPath = avatarPath
             )
         }

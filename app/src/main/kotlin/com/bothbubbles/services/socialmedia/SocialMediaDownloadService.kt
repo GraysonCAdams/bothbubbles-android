@@ -7,10 +7,8 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
-import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import timber.log.Timber
 import java.util.Collections
@@ -64,10 +62,11 @@ class SocialMediaDownloadService @Inject constructor(
     private val dismissedLinks: MutableSet<String> = Collections.synchronizedSet(mutableSetOf())
 
     companion object {
-        private const val TIKWM_API_URL = "https://www.tikwm.com/api/"
-
         // User agent to mimic a browser
         private const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+        // Mobile user agent to mimic Instagram Android app (from Cobalt)
+        private const val MOBILE_USER_AGENT = "Instagram 275.0.0.27.98 Android (33/13; 280dpi; 720x1423; Xiaomi; Redmi 7; onclite; qcom; en_US; 458229237)"
 
         // URL patterns for detection
         private val TIKTOK_PATTERNS = listOf(
@@ -77,12 +76,13 @@ class SocialMediaDownloadService @Inject constructor(
         )
 
         private val INSTAGRAM_PATTERNS = listOf(
-            // Standard Instagram URLs (with optional query params and trailing slash)
-            Regex("""(?:https?://)?(?:www\.)?instagram\.com/(?:p|reel|reels|tv)/[A-Za-z0-9_-]+[/?]?""", RegexOption.IGNORE_CASE),
-            // Share URLs (newer format)
-            Regex("""(?:https?://)?(?:www\.)?instagram\.com/share/(?:reel|p|video)/[A-Za-z0-9_-]+[/?]?""", RegexOption.IGNORE_CASE),
-            // Short URLs
-            Regex("""(?:https?://)?(?:www\.)?instagr\.am/(?:p|reel)/[A-Za-z0-9_-]+[/?]?""", RegexOption.IGNORE_CASE)
+            // Standard Instagram Reels URLs (with optional query params and trailing slash)
+            // Note: We intentionally exclude /p/ (posts) - only reels have downloadable video
+            Regex("""(?:https?://)?(?:www\.)?instagram\.com/(?:reel|reels)/[A-Za-z0-9_-]+[/?]?""", RegexOption.IGNORE_CASE),
+            // Share URLs (newer format) - reels only
+            Regex("""(?:https?://)?(?:www\.)?instagram\.com/share/(?:reel|video)/[A-Za-z0-9_-]+[/?]?""", RegexOption.IGNORE_CASE),
+            // Short URLs - reels only
+            Regex("""(?:https?://)?(?:www\.)?instagr\.am/reel/[A-Za-z0-9_-]+[/?]?""", RegexOption.IGNORE_CASE)
         )
     }
 
@@ -243,18 +243,33 @@ class SocialMediaDownloadService @Inject constructor(
     }
 
     /**
-     * Extracts video URL from TikTok using tikwm.com API.
+     * Extracts video URL from TikTok by directly fetching the page and parsing embedded JSON.
      *
-     * API: GET https://www.tikwm.com/api/?url={url}
-     * Response: { "data": { "play": "video_url", "hdplay": "hd_video_url", "music": "audio_url", "cover": "thumbnail_url" } }
+     * This method:
+     * 1. Resolves short URLs (vm.tiktok.com, vt.tiktok.com) to full URLs
+     * 2. Fetches the TikTok page with browser-like headers
+     * 3. Parses __UNIVERSAL_DATA_FOR_REHYDRATION__ JSON embedded in the page
+     * 4. Extracts downloadAddr (full video with audio) or playAddr (video stream)
      */
     private fun extractTikTokVideo(url: String): SocialMediaResult {
-        val apiUrl = "$TIKWM_API_URL?url=${java.net.URLEncoder.encode(url, "UTF-8")}"
+        // Step 1: Resolve short URLs to full URLs
+        val resolvedUrl = resolveTikTokShortUrl(url)
+        Timber.d("[TikTok] Resolved URL: $resolvedUrl")
 
+        // Step 2: Fetch the TikTok page
         val request = Request.Builder()
-            .url(apiUrl)
+            .url(resolvedUrl)
             .header("User-Agent", USER_AGENT)
-            .header("Accept", "application/json")
+            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8")
+            .header("Accept-Language", "en-US,en;q=0.9")
+            .header("Accept-Encoding", "gzip, deflate")
+            .header("Connection", "keep-alive")
+            .header("Upgrade-Insecure-Requests", "1")
+            .header("Sec-Fetch-Dest", "document")
+            .header("Sec-Fetch-Mode", "navigate")
+            .header("Sec-Fetch-Site", "none")
+            .header("Sec-Fetch-User", "?1")
+            .header("Cache-Control", "max-age=0")
             .get()
             .build()
 
@@ -265,52 +280,124 @@ class SocialMediaDownloadService @Inject constructor(
 
             val body = response.body?.string()
             if (body.isNullOrBlank()) {
-                return SocialMediaResult.Error("Empty response from TikWM API")
+                return SocialMediaResult.Error("Empty response from TikTok")
             }
 
-            return parseTikWmResponse(body)
+            return parseTikTokPageResponse(body)
         }
     }
 
-    private fun parseTikWmResponse(json: String): SocialMediaResult {
-        return try {
-            val root = JSONObject(json)
-            val code = root.optInt("code", -1)
+    /**
+     * Resolves TikTok short URLs (vm.tiktok.com, vt.tiktok.com, tiktok.com/t/) to full video URLs.
+     */
+    private fun resolveTikTokShortUrl(url: String): String {
+        // Check if it's already a full URL
+        if (url.contains("tiktok.com/@") && url.contains("/video/")) {
+            return url
+        }
 
-            if (code != 0) {
-                val msg = root.optString("msg", "Unknown error")
-                return SocialMediaResult.Error("TikWM error: $msg")
+        // For short URLs, follow redirects to get the full URL
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", USER_AGENT)
+            .head() // Just get headers, don't download body
+            .build()
+
+        // Use a client that doesn't auto-follow redirects so we can get the Location header
+        val noRedirectClient = httpClient.newBuilder()
+            .followRedirects(false)
+            .build()
+
+        return try {
+            noRedirectClient.newCall(request).execute().use { response ->
+                val location = response.header("Location")
+                if (location != null && location.contains("tiktok.com")) {
+                    Timber.d("[TikTok] Short URL resolved: $url -> $location")
+                    location
+                } else {
+                    // If no redirect, try following with the regular client
+                    httpClient.newCall(request).execute().use { followedResponse ->
+                        followedResponse.request.url.toString()
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "[TikTok] Failed to resolve short URL, using original")
+            url
+        }
+    }
+
+    /**
+     * Parses the TikTok page HTML to extract video URLs from embedded JSON.
+     */
+    private fun parseTikTokPageResponse(html: String): SocialMediaResult {
+        return try {
+            // Look for __UNIVERSAL_DATA_FOR_REHYDRATION__ JSON
+            val jsonPattern = """<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">(.+?)</script>""".toRegex(RegexOption.DOT_MATCHES_ALL)
+            val match = jsonPattern.find(html)
+
+            if (match == null) {
+                Timber.w("[TikTok] Could not find __UNIVERSAL_DATA_FOR_REHYDRATION__ in page")
+                return SocialMediaResult.Error("Could not find video data in page")
             }
 
-            val data = root.optJSONObject("data")
-                ?: return SocialMediaResult.Error("No data in response")
+            val jsonStr = match.groupValues[1]
+            val root = JSONObject(jsonStr)
 
-            val videoUrl = data.optString("play").takeIf { it.isNotBlank() }
-                ?: return SocialMediaResult.Error("No video URL in response")
+            // Navigate to video data: __DEFAULT_SCOPE__ -> webapp.video-detail -> itemInfo -> itemStruct -> video
+            val defaultScope = root.optJSONObject("__DEFAULT_SCOPE__")
+            val videoDetail = defaultScope?.optJSONObject("webapp.video-detail")
+            val itemInfo = videoDetail?.optJSONObject("itemInfo")
+            val itemStruct = itemInfo?.optJSONObject("itemStruct")
+            val video = itemStruct?.optJSONObject("video")
 
-            val hdVideoUrl = data.optString("hdplay").takeIf { it.isNotBlank() }
-            val audioUrl = data.optString("music").takeIf { it.isNotBlank() }
-            val thumbnailUrl = data.optString("cover").takeIf { it.isNotBlank() }
+            if (video == null) {
+                Timber.w("[TikTok] Could not navigate to video object in JSON")
+                return SocialMediaResult.Error("Video data not found in response")
+            }
+
+            // Priority 1: downloadAddr (full video with audio, watermark-free)
+            val downloadAddr = video.optString("downloadAddr").takeIf { it.isNotBlank() }
+
+            // Priority 2: playAddr (video stream)
+            val playAddr = video.optString("playAddr").takeIf { it.isNotBlank() }
+
+            // Priority 3: playUrl (often audio-only, avoid if possible)
+            val playUrl = video.optString("playUrl").takeIf { it.isNotBlank() }
+
+            // Get cover/thumbnail
+            val cover = video.optString("cover").takeIf { it.isNotBlank() }
+                ?: video.optString("dynamicCover").takeIf { it.isNotBlank() }
+                ?: video.optString("originCover").takeIf { it.isNotBlank() }
+
+            // Choose the best video URL
+            val videoUrl = downloadAddr ?: playAddr
+            if (videoUrl == null) {
+                Timber.w("[TikTok] No video URL found in response")
+                return SocialMediaResult.Error("No video URL in response")
+            }
+
+            Timber.d("[TikTok] Found video URL via direct extraction: ${videoUrl.take(80)}...")
 
             SocialMediaResult.Success(
                 videoUrl = videoUrl,
-                hdVideoUrl = hdVideoUrl,
-                audioUrl = audioUrl,
-                thumbnailUrl = thumbnailUrl
+                hdVideoUrl = downloadAddr, // downloadAddr is typically highest quality
+                audioUrl = playUrl, // playUrl is often audio-only
+                thumbnailUrl = cover
             )
         } catch (e: Exception) {
-            Timber.e(e, "Failed to parse TikWM response")
+            Timber.e(e, "[TikTok] Failed to parse page response")
             SocialMediaResult.Error("Failed to parse response: ${e.message}", e)
         }
     }
 
     /**
-     * Extracts video URL from Instagram using direct GraphQL API or third-party services.
+     * Extracts video URL from Instagram using multiple methods (matching Cobalt's approach).
      *
      * Order of methods:
-     * 1. Instagram GraphQL API (like instaloader uses)
-     * 2. Instagram JSON API (?__a=1)
-     * 3. Third-party fallback services
+     * 1. Mobile API via oEmbed (i.instagram.com) - Cobalt's primary method
+     * 2. Instagram GraphQL API (doc_id approach)
+     * 3. Instagram JSON API (?__a=1)
      */
     private fun extractInstagramVideo(url: String): SocialMediaResult {
         // Extract shortcode from URL
@@ -322,28 +409,28 @@ class SocialMediaDownloadService @Inject constructor(
 
         Timber.d("[Instagram] Extracted shortcode: $shortcode from $url")
 
-        // Method 1: Try Instagram GraphQL API (like instaloader)
+        // Method 1: Try Mobile API via oEmbed (Cobalt's primary method)
+        val mobileApiResult = tryExtractViaMobileApi(shortcode)
+        if (mobileApiResult is SocialMediaResult.Success) {
+            return mobileApiResult
+        }
+
+        // Method 2: Try Instagram GraphQL API (like instaloader)
         val graphqlResult = tryExtractViaGraphQL(shortcode)
         if (graphqlResult is SocialMediaResult.Success) {
             return graphqlResult
         }
 
-        // Method 2: Try Instagram JSON API
+        // Method 3: Try Instagram JSON API
         val jsonApiResult = tryExtractViaJsonApi(shortcode)
         if (jsonApiResult is SocialMediaResult.Success) {
             return jsonApiResult
         }
 
-        // Method 3: Try Instagram embed page
-        val embedResult = tryExtractViaEmbed(shortcode)
-        if (embedResult is SocialMediaResult.Success) {
-            return embedResult
-        }
-
-        // Method 4: Try Cobalt API instances
-        val cobaltResult = tryExtractViaCobalt(shortcode)
-        if (cobaltResult is SocialMediaResult.Success) {
-            return cobaltResult
+        // Method 4: Try HTML page scraping (fallback)
+        val htmlResult = tryExtractViaHtmlScrape(url)
+        if (htmlResult is SocialMediaResult.Success) {
+            return htmlResult
         }
 
         // All methods failed
@@ -352,13 +439,178 @@ class SocialMediaDownloadService @Inject constructor(
     }
 
     /**
-     * Extract shortcode from various Instagram URL formats
+     * Try extracting via Instagram's Mobile API (Cobalt's primary method).
+     *
+     * Two-step process:
+     * 1. Call oEmbed API to get media_id from shortcode
+     * 2. Call Mobile API with media_id to get video URL
+     */
+    private fun tryExtractViaMobileApi(shortcode: String): SocialMediaResult {
+        return try {
+            // Step 1: Get media_id via oEmbed API
+            val mediaId = getMediaIdFromOEmbed(shortcode)
+            if (mediaId == null) {
+                Timber.d("[Instagram] Could not get media_id from oEmbed")
+                return SocialMediaResult.Error("oEmbed failed to return media_id")
+            }
+
+            Timber.d("[Instagram] Got media_id: $mediaId from oEmbed")
+
+            // Step 2: Get video URL via Mobile API
+            val mediaInfoUrl = "https://i.instagram.com/api/v1/media/${mediaId}/info/"
+
+            val request = Request.Builder()
+                .url(mediaInfoUrl)
+                .header("User-Agent", MOBILE_USER_AGENT)
+                .header("Accept", "*/*")
+                .header("Accept-Language", "en-US")
+                .header("X-IG-App-Locale", "en_US")
+                .header("X-IG-Device-Locale", "en_US")
+                .header("X-IG-Mapped-Locale", "en_US")
+                .header("X-FB-HTTP-Engine", "Liger")
+                .header("X-FB-Client-IP", "True")
+                .header("X-FB-Server-Cluster", "True")
+                .header("Content-Length", "0")
+                .get()
+                .build()
+
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    Timber.d("[Instagram] Mobile API returned ${response.code}")
+                    return@use SocialMediaResult.Error("Mobile API failed: ${response.code}")
+                }
+
+                val body = response.body?.string()
+                if (body.isNullOrBlank()) {
+                    return@use SocialMediaResult.Error("Empty Mobile API response")
+                }
+
+                parseMobileApiResponse(body)
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "[Instagram] Mobile API extraction failed")
+            SocialMediaResult.Error("Mobile API failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Get media_id from Instagram's oEmbed API.
+     */
+    private fun getMediaIdFromOEmbed(shortcode: String): String? {
+        return try {
+            // Use /p/ for oEmbed - it works for all content types including reels
+            // (this is what Cobalt uses - /p/ is the generic shortcode resolver)
+            val postUrl = "https://www.instagram.com/p/$shortcode/"
+            val oembedUrl = "https://i.instagram.com/api/v1/oembed/?url=${java.net.URLEncoder.encode(postUrl, "UTF-8")}"
+
+            val request = Request.Builder()
+                .url(oembedUrl)
+                .header("User-Agent", MOBILE_USER_AGENT)
+                .header("Accept", "*/*")
+                .header("Accept-Language", "en-US")
+                .header("X-IG-App-Locale", "en_US")
+                .header("X-IG-Device-Locale", "en_US")
+                .header("X-IG-Mapped-Locale", "en_US")
+                .header("X-FB-HTTP-Engine", "Liger")
+                .get()
+                .build()
+
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    Timber.d("[Instagram] oEmbed API returned ${response.code}")
+                    return@use null
+                }
+
+                val body = response.body?.string()
+                if (body.isNullOrBlank()) {
+                    return@use null
+                }
+
+                val json = JSONObject(body)
+                json.optString("media_id").takeIf { it.isNotBlank() }
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "[Instagram] oEmbed request failed")
+            null
+        }
+    }
+
+    /**
+     * Parse Mobile API response to extract video URL.
+     */
+    private fun parseMobileApiResponse(json: String): SocialMediaResult {
+        return try {
+            val root = JSONObject(json)
+            val items = root.optJSONArray("items")
+            if (items == null || items.length() == 0) {
+                Timber.d("[Instagram] No items in Mobile API response")
+                return SocialMediaResult.Error("No items in response")
+            }
+
+            val item = items.getJSONObject(0)
+
+            // Check if it's a video
+            val mediaType = item.optInt("media_type", 0)
+            if (mediaType != 2) { // 2 = video
+                Timber.d("[Instagram] Content is not a video (media_type: $mediaType)")
+                return SocialMediaResult.NotSupported
+            }
+
+            // Get video versions - select highest quality
+            val videoVersions = item.optJSONArray("video_versions")
+            if (videoVersions == null || videoVersions.length() == 0) {
+                // Try single video_url field
+                val singleVideoUrl = item.optString("video_url")
+                if (singleVideoUrl.isNotBlank()) {
+                    Timber.d("[Instagram] Found video via Mobile API (single url): ${singleVideoUrl.take(80)}...")
+                    return SocialMediaResult.Success(videoUrl = singleVideoUrl)
+                }
+                return SocialMediaResult.Error("No video versions in response")
+            }
+
+            // Find highest resolution video
+            var bestVideoUrl: String? = null
+            var bestWidth = 0
+            for (i in 0 until videoVersions.length()) {
+                val version = videoVersions.getJSONObject(i)
+                val width = version.optInt("width", 0)
+                val url = version.optString("url")
+                if (width > bestWidth && url.isNotBlank()) {
+                    bestWidth = width
+                    bestVideoUrl = url
+                }
+            }
+
+            if (bestVideoUrl == null) {
+                return SocialMediaResult.Error("Could not find video URL in versions")
+            }
+
+            // Get thumbnail
+            val imageVersions = item.optJSONObject("image_versions2")
+            val candidates = imageVersions?.optJSONArray("candidates")
+            val thumbnailUrl = candidates?.optJSONObject(0)?.optString("url")
+
+            Timber.d("[Instagram] Found video via Mobile API: ${bestVideoUrl.take(80)}...")
+            SocialMediaResult.Success(
+                videoUrl = bestVideoUrl,
+                thumbnailUrl = thumbnailUrl
+            )
+        } catch (e: Exception) {
+            Timber.w(e, "[Instagram] Failed to parse Mobile API response")
+            SocialMediaResult.Error("Failed to parse Mobile API: ${e.message}")
+        }
+    }
+
+    /**
+     * Extract shortcode from Instagram Reels URL formats.
+     * Note: We only support /reel/ and /reels/ URLs, not /p/ (posts).
      */
     private fun extractShortcode(url: String): String? {
-        // Match /p/, /reel/, /reels/, /tv/, or /share/reel/ followed by shortcode
+        // Match /reel/, /reels/, or /share/reel/ followed by shortcode
+        // Intentionally excludes /p/ (posts) - we only want reels
         val patterns = listOf(
-            """/(?:p|reel|reels|tv)/([A-Za-z0-9_-]+)""".toRegex(),
-            """/share/(?:reel|p|video)/([A-Za-z0-9_-]+)""".toRegex()
+            """/(?:reel|reels)/([A-Za-z0-9_-]+)""".toRegex(),
+            """/share/(?:reel|video)/([A-Za-z0-9_-]+)""".toRegex()
         )
 
         for (pattern in patterns) {
@@ -371,40 +623,48 @@ class SocialMediaDownloadService @Inject constructor(
     }
 
     /**
-     * Try extracting via Instagram's GraphQL API using doc_id approach.
-     * This is the method used by yt-dlp and other working extractors in 2024/2025.
-     *
-     * The key insight is using doc_id instead of query_hash, and parsing
-     * xdt_shortcode_media instead of shortcode_media.
+     * Try extracting via Instagram's GraphQL API.
+     * Uses the /api/graphql endpoint with POST method (working as of Dec 2024).
+     * Based on: https://github.com/ahmedrangel/instagram-media-scraper
      */
     private fun tryExtractViaGraphQL(shortcode: String): SocialMediaResult {
         return try {
-            // Working doc_id from yt-dlp (as of Dec 2024)
-            val docId = "8845758582119845"
-            val variables = """{"shortcode":"$shortcode","child_comment_count":3,"fetch_comment_count":40,"parent_comment_count":24,"has_threaded_comments":true}"""
-            val encodedVariables = java.net.URLEncoder.encode(variables, "UTF-8")
+            // Working doc_id from instagram-media-scraper (Dec 2024)
+            val docId = "10015901848474"
+            val lsd = "AVqbxe3J_YA"  // Facebook LSD token
+            val variables = """{"shortcode":"$shortcode"}"""
 
-            val graphqlUrl = "https://www.instagram.com/graphql/query/?doc_id=$docId&variables=$encodedVariables"
+            // Build form-encoded body
+            val formBody = okhttp3.FormBody.Builder()
+                .add("variables", variables)
+                .add("doc_id", docId)
+                .add("lsd", lsd)
+                .build()
 
             val request = Request.Builder()
-                .url(graphqlUrl)
+                .url("https://www.instagram.com/api/graphql")
                 .header("User-Agent", USER_AGENT)
-                .header("Accept", "*/*")
-                .header("Accept-Language", "en-US,en;q=0.9")
-                .header("X-IG-App-ID", "936619743392459")  // Instagram web app ID
-                .header("X-ASBD-ID", "198387")
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .header("X-IG-App-ID", "936619743392459")
+                .header("X-FB-LSD", lsd)
+                .header("X-ASBD-ID", "129477")
+                .header("Sec-Fetch-Site", "same-origin")
                 .header("Origin", "https://www.instagram.com")
                 .header("Referer", "https://www.instagram.com/")
-                .get()
+                .post(formBody)
                 .build()
 
             httpClient.newCall(request).execute().use { response ->
+                val body = response.body?.string()
+                Timber.d("[Instagram] GraphQL API returned ${response.code}, body length: ${body?.length ?: 0}")
+                if ((body?.length ?: 0) < 500) {
+                    Timber.d("[Instagram] GraphQL response: $body")
+                }
+
                 if (!response.isSuccessful) {
-                    Timber.d("[Instagram] GraphQL API returned ${response.code}")
                     return@use SocialMediaResult.Error("GraphQL failed: ${response.code}")
                 }
 
-                val body = response.body?.string()
                 if (body.isNullOrBlank()) {
                     return@use SocialMediaResult.Error("Empty GraphQL response")
                 }
@@ -557,174 +817,86 @@ class SocialMediaDownloadService @Inject constructor(
     }
 
     /**
-     * Try extracting via Instagram's embed page
-     * Fetches the embed HTML and extracts video URL from meta tags
+     * Try extracting video URL by scraping the Instagram page HTML.
+     * Looks for video URLs in:
+     * 1. Open Graph meta tags (og:video)
+     * 2. Embedded JSON data in script tags
      */
-    private fun tryExtractViaEmbed(shortcode: String): SocialMediaResult {
+    private fun tryExtractViaHtmlScrape(url: String): SocialMediaResult {
         return try {
-            // Try Instagram's embed endpoint
-            val embedUrl = "https://www.instagram.com/p/$shortcode/embed/"
-
             val request = Request.Builder()
-                .url(embedUrl)
+                .url(url)
                 .header("User-Agent", USER_AGENT)
-                .header("Accept", "text/html,application/xhtml+xml")
+                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                 .header("Accept-Language", "en-US,en;q=0.9")
+                .header("Sec-Fetch-Dest", "document")
+                .header("Sec-Fetch-Mode", "navigate")
+                .header("Sec-Fetch-Site", "none")
                 .get()
                 .build()
 
             httpClient.newCall(request).execute().use { response ->
                 val body = response.body?.string()
-                Timber.d("[Instagram] Embed response: ${response.code}, length: ${body?.length}")
+                Timber.d("[Instagram] HTML scrape returned ${response.code}, body length: ${body?.length ?: 0}")
 
                 if (!response.isSuccessful || body.isNullOrBlank()) {
-                    return@use SocialMediaResult.Error("Embed page failed: ${response.code}")
+                    return@use SocialMediaResult.Error("HTML fetch failed: ${response.code}")
                 }
 
-                parseEmbedResponse(body)
-            }
-        } catch (e: Exception) {
-            Timber.w(e, "[Instagram] Embed extraction failed")
-            SocialMediaResult.Error("Embed failed: ${e.message}")
-        }
-    }
+                // Check for login requirement
+                if (body.contains("\"require_login\":true") || body.contains("login_required")) {
+                    Timber.d("[Instagram] Login required for this content")
+                    return@use SocialMediaResult.Error("Login required")
+                }
 
-    private fun parseEmbedResponse(html: String): SocialMediaResult {
-        return try {
-            // Look for video URL in embed page - multiple patterns
-            val patterns = listOf(
-                // Direct video URL in JSON
-                """"video_url"\s*:\s*"([^"]+)"""".toRegex(),
-                // Content URL meta tag
-                """content=["']([^"']*\.mp4[^"']*)["']""".toRegex(RegexOption.IGNORE_CASE),
-                // Video source in HTML
-                """<source[^>]+src=["']([^"']+\.mp4[^"']*)["']""".toRegex(RegexOption.IGNORE_CASE),
-                // og:video meta tag
-                """og:video(?::url)?["']\s+content=["']([^"']+)["']""".toRegex(RegexOption.IGNORE_CASE),
-                """content=["']([^"']+)["']\s+(?:property|name)=["']og:video""".toRegex(RegexOption.IGNORE_CASE)
-            )
+                // Method 1: Look for og:video meta tag
+                val ogVideoPattern = """<meta\s+(?:property|name)=["']og:video(?::url)?["']\s+content=["']([^"']+)["']""".toRegex(RegexOption.IGNORE_CASE)
+                val ogVideoMatch = ogVideoPattern.find(body)
+                if (ogVideoMatch != null) {
+                    val videoUrl = ogVideoMatch.groupValues[1].replace("&amp;", "&")
+                    if (videoUrl.isNotBlank() && videoUrl.contains(".mp4")) {
+                        Timber.d("[Instagram] Found video via og:video meta tag")
 
-            for (pattern in patterns) {
-                val match = pattern.find(html)
-                if (match != null) {
-                    var videoUrl = match.groupValues[1]
-                        .replace("\\u0026", "&")
-                        .replace("\\/", "/")
-                        .replace("&amp;", "&")
+                        // Try to get thumbnail
+                        val ogImagePattern = """<meta\s+(?:property|name)=["']og:image["']\s+content=["']([^"']+)["']""".toRegex(RegexOption.IGNORE_CASE)
+                        val thumbnailUrl = ogImagePattern.find(body)?.groupValues?.get(1)?.replace("&amp;", "&")
 
-                    if (videoUrl.isNotBlank() && (videoUrl.contains(".mp4") || videoUrl.contains("video"))) {
-                        Timber.d("[Instagram] Found video via embed: $videoUrl")
-                        return SocialMediaResult.Success(videoUrl = videoUrl)
+                        return@use SocialMediaResult.Success(
+                            videoUrl = videoUrl,
+                            thumbnailUrl = thumbnailUrl
+                        )
                     }
                 }
-            }
 
-            // Check if login required
-            if (html.contains("loginForm") || html.contains("\"viewerId\":null")) {
-                Timber.d("[Instagram] Embed page requires login")
-                return SocialMediaResult.NotSupported
-            }
+                // Method 2: Look for video URL in embedded JSON (various patterns)
+                val videoPatterns = listOf(
+                    """"video_url"\s*:\s*"([^"]+)"""".toRegex(),
+                    """"contentUrl"\s*:\s*"([^"]+)"""".toRegex(),
+                    """"playback_url"\s*:\s*"([^"]+)"""".toRegex(),
+                    """"video_versions"\s*:\s*\[\s*\{\s*[^}]*"url"\s*:\s*"([^"]+)"""".toRegex()
+                )
 
-            Timber.d("[Instagram] No video found in embed page (length: ${html.length})")
-            SocialMediaResult.Error("No video URL in embed page")
-        } catch (e: Exception) {
-            Timber.w(e, "[Instagram] Failed to parse embed response")
-            SocialMediaResult.Error("Failed to parse embed: ${e.message}")
-        }
-    }
-
-    /**
-     * Try extracting via Cobalt API instances (no auth required)
-     * Tries multiple public instances from instances.cobalt.best
-     */
-    private fun tryExtractViaCobalt(shortcode: String): SocialMediaResult {
-        val instagramUrl = "https://www.instagram.com/reel/$shortcode/"
-
-        // Public Cobalt instances that don't require JWT (from instances.cobalt.best)
-        val cobaltInstances = listOf(
-            "https://cobalt-backend.canine.tools/",
-            "https://cobalt-api.meowing.de/",
-            "https://capi.3kh0.net/"
-        )
-
-        for (cobaltUrl in cobaltInstances) {
-            try {
-                val jsonBody = JSONObject().apply {
-                    put("url", instagramUrl)
-                }
-
-                val requestBody = jsonBody.toString()
-                    .toRequestBody("application/json".toMediaType())
-
-                val request = Request.Builder()
-                    .url(cobaltUrl)
-                    .header("User-Agent", USER_AGENT)
-                    .header("Accept", "application/json")
-                    .header("Content-Type", "application/json")
-                    .post(requestBody)
-                    .build()
-
-                httpClient.newCall(request).execute().use { response ->
-                    val body = response.body?.string()
-                    Timber.d("[Instagram] Cobalt ($cobaltUrl) response: ${response.code}, body: ${body?.take(300)}")
-
-                    if (response.isSuccessful && !body.isNullOrBlank()) {
-                        val result = parseCobaltResponse(body)
-                        if (result is SocialMediaResult.Success) {
-                            return result
+                for (pattern in videoPatterns) {
+                    val match = pattern.find(body)
+                    if (match != null) {
+                        val videoUrl = match.groupValues[1]
+                            .replace("\\u0026", "&")
+                            .replace("\\\\u0026", "&")
+                            .replace("\\/", "/")
+                            .replace("\\\\", "\\")
+                        if (videoUrl.isNotBlank() && (videoUrl.contains(".mp4") || videoUrl.contains("instagram"))) {
+                            Timber.d("[Instagram] Found video via embedded JSON")
+                            return@use SocialMediaResult.Success(videoUrl = videoUrl)
                         }
                     }
                 }
-            } catch (e: Exception) {
-                Timber.w(e, "[Instagram] Cobalt ($cobaltUrl) failed")
-            }
-        }
 
-        return SocialMediaResult.Error("All Cobalt instances failed")
-    }
-
-    private fun parseCobaltResponse(json: String): SocialMediaResult {
-        return try {
-            val root = JSONObject(json)
-            val status = root.optString("status", "")
-
-            when (status) {
-                "stream", "redirect" -> {
-                    val videoUrl = root.optString("url", "")
-                    if (videoUrl.isNotBlank()) {
-                        Timber.d("[Instagram] Found video via Cobalt: $videoUrl")
-                        SocialMediaResult.Success(videoUrl = videoUrl)
-                    } else {
-                        SocialMediaResult.Error("No URL in Cobalt response")
-                    }
-                }
-                "picker" -> {
-                    // Multiple options - get the first video
-                    val picker = root.optJSONArray("picker")
-                    if (picker != null && picker.length() > 0) {
-                        val first = picker.optJSONObject(0)
-                        val videoUrl = first?.optString("url", "")
-                        if (!videoUrl.isNullOrBlank()) {
-                            Timber.d("[Instagram] Found video via Cobalt (picker): $videoUrl")
-                            return SocialMediaResult.Success(videoUrl = videoUrl)
-                        }
-                    }
-                    SocialMediaResult.Error("No video in Cobalt picker response")
-                }
-                "error" -> {
-                    val errorText = root.optJSONObject("text")?.optString("en", "")
-                        ?: root.optString("text", "Unknown error")
-                    Timber.d("[Instagram] Cobalt error: $errorText")
-                    SocialMediaResult.Error("Cobalt: $errorText")
-                }
-                else -> {
-                    Timber.d("[Instagram] Unknown Cobalt status: $status")
-                    SocialMediaResult.Error("Unknown Cobalt response: $status")
-                }
+                Timber.d("[Instagram] No video URL found in HTML")
+                SocialMediaResult.Error("No video URL found in page HTML")
             }
         } catch (e: Exception) {
-            Timber.w(e, "[Instagram] Failed to parse Cobalt response")
-            SocialMediaResult.Error("Failed to parse Cobalt: ${e.message}")
+            Timber.w(e, "[Instagram] HTML scrape failed")
+            SocialMediaResult.Error("HTML scrape failed: ${e.message}")
         }
     }
 

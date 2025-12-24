@@ -11,7 +11,11 @@ import com.bothbubbles.data.local.db.BothBubblesDatabase
 import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.MessageDao
+import com.bothbubbles.data.local.db.dao.SocialMediaLinkDao
 import com.bothbubbles.data.local.db.dao.UnifiedChatDao
+import com.bothbubbles.core.model.entity.SocialMediaLinkEntity
+import com.bothbubbles.core.model.entity.SocialMediaPlatform
+import java.security.MessageDigest
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.MessageSource
@@ -69,8 +73,21 @@ class IMessageSenderStrategy @Inject constructor(
     private val settingsDataStore: SettingsDataStore,
     private val videoCompressor: VideoCompressor,
     private val imageCompressor: ImageCompressor,
-    private val attachmentPersistenceManager: AttachmentPersistenceManager
+    private val attachmentPersistenceManager: AttachmentPersistenceManager,
+    private val socialMediaLinkDao: SocialMediaLinkDao
 ) : MessageSenderStrategy {
+
+    companion object {
+        // Instagram URL patterns - matches IncomingMessageHandler
+        private val INSTAGRAM_PATTERN = Regex(
+            """https?://(?:www\.)?instagram\.com/(?:reel|reels|p|share/reel|share/p)/[A-Za-z0-9_-]+[^\s]*"""
+        )
+
+        // TikTok URL patterns - matches IncomingMessageHandler
+        private val TIKTOK_PATTERN = Regex(
+            """https?://(?:www\.|vm\.|vt\.)?tiktok\.com/[^\s]+"""
+        )
+    }
 
     private val _uploadProgress = MutableStateFlow<UploadProgress?>(null)
     override val uploadProgress: StateFlow<UploadProgress?> = _uploadProgress.asStateFlow()
@@ -206,6 +223,14 @@ class IMessageSenderStrategy @Inject constructor(
                     Timber.w("Non-critical error replacing GUID: ${e.message}")
                 }
 
+                // Store social media links for outgoing messages
+                storeSocialMediaLinks(
+                    messageGuid = serverMessage.guid,
+                    chatGuid = options.chatGuid,
+                    text = options.text,
+                    timestamp = serverMessage.dateCreated ?: System.currentTimeMillis()
+                )
+
                 SendResult.Success(serverMessage.toEntity(options.chatGuid))
             } else {
                 messageDao.updateErrorStatus(tempGuid, 0)
@@ -214,6 +239,15 @@ class IMessageSenderStrategy @Inject constructor(
                         MessageError.SendFailed(tempGuid, "Failed to find temp message"),
                         tempGuid
                     )
+
+                // Store social media links for outgoing messages (using temp guid if no server response)
+                storeSocialMediaLinks(
+                    messageGuid = message.guid,
+                    chatGuid = options.chatGuid,
+                    text = options.text,
+                    timestamp = message.dateCreated
+                )
+
                 SendResult.Success(message)
             }
         } catch (e: Exception) {
@@ -398,6 +432,22 @@ class IMessageSenderStrategy @Inject constructor(
                 // This creates new attachment entries with server GUIDs linked to the server message
                 syncOutboundAttachments(serverMessage, relocatedPaths.filterNotNull())
 
+                // Store social media links for outgoing messages with attachments
+                // Combine text and captions for link detection
+                val fullText = buildString {
+                    append(options.text)
+                    options.attachments.mapNotNull { it.caption }.filter { it.isNotBlank() }.forEach {
+                        if (isNotEmpty()) append("\n")
+                        append(it)
+                    }
+                }
+                storeSocialMediaLinks(
+                    messageGuid = serverMessage.guid,
+                    chatGuid = options.chatGuid,
+                    text = fullText,
+                    timestamp = serverMessage.dateCreated ?: System.currentTimeMillis()
+                )
+
                 return SendResult.Success(serverMessage.toEntity(options.chatGuid))
             }
 
@@ -407,6 +457,15 @@ class IMessageSenderStrategy @Inject constructor(
                     MessageError.SendFailed(tempGuid, "Failed to find temp message"),
                     tempGuid
                 )
+
+            // Store social media links for outgoing messages (using temp guid if no server response)
+            storeSocialMediaLinks(
+                messageGuid = message.guid,
+                chatGuid = options.chatGuid,
+                text = options.text,
+                timestamp = message.dateCreated
+            )
+
             return SendResult.Success(message)
 
         } catch (e: Exception) {
@@ -656,5 +715,76 @@ class IMessageSenderStrategy @Inject constructor(
                lowerMessage.contains("in transit") ||
                lowerMessage.contains("already queued") ||
                lowerMessage.contains("already processing")
+    }
+
+    /**
+     * Detects and stores social media links from outgoing message text.
+     * This populates the social_media_links table for the Reels feed.
+     * Mirrors the logic in IncomingMessageHandler.storeSocialMediaLinks().
+     */
+    private suspend fun storeSocialMediaLinks(
+        messageGuid: String,
+        chatGuid: String,
+        text: String?,
+        timestamp: Long
+    ) {
+        if (text.isNullOrBlank()) return
+        val links = mutableListOf<SocialMediaLinkEntity>()
+
+        // Find Instagram URLs
+        for (match in INSTAGRAM_PATTERN.findAll(text)) {
+            val url = match.value
+            links.add(
+                SocialMediaLinkEntity(
+                    urlHash = hashUrl(url),
+                    url = url,
+                    messageGuid = messageGuid,
+                    chatGuid = chatGuid,
+                    platform = SocialMediaPlatform.INSTAGRAM.name,
+                    senderAddress = null, // Outgoing, so no sender address
+                    isFromMe = true,
+                    sentTimestamp = timestamp,
+                    isDownloaded = false,
+                    createdAt = System.currentTimeMillis()
+                )
+            )
+        }
+
+        // Find TikTok URLs
+        for (match in TIKTOK_PATTERN.findAll(text)) {
+            val url = match.value
+            links.add(
+                SocialMediaLinkEntity(
+                    urlHash = hashUrl(url),
+                    url = url,
+                    messageGuid = messageGuid,
+                    chatGuid = chatGuid,
+                    platform = SocialMediaPlatform.TIKTOK.name,
+                    senderAddress = null, // Outgoing, so no sender address
+                    isFromMe = true,
+                    sentTimestamp = timestamp,
+                    isDownloaded = false,
+                    createdAt = System.currentTimeMillis()
+                )
+            )
+        }
+
+        if (links.isNotEmpty()) {
+            try {
+                socialMediaLinkDao.insertAll(links)
+                Timber.d("[SocialMedia] Stored ${links.size} social media link(s) from outgoing message $messageGuid")
+            } catch (e: Exception) {
+                Timber.w(e, "[SocialMedia] Failed to store social media links for outgoing message")
+            }
+        }
+    }
+
+    /**
+     * Hash URL for deduplication (matches IncomingMessageHandler.hashUrl and SocialMediaCacheManager.hashUrl).
+     */
+    private fun hashUrl(url: String): String {
+        val md = MessageDigest.getInstance("SHA-256")
+        val digest = md.digest(url.toByteArray())
+        return digest.joinToString("") { "%02x".format(it) }.take(32)
     }
 }

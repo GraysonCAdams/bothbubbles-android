@@ -189,7 +189,7 @@ class ChatViewModel @Inject constructor(
 
     // Reels delegate - public accessor
     val reels: ChatReelsDelegate = reelsDelegate.also {
-        it.initialize(chatGuid, viewModelScope)
+        it.initialize(chatGuid, mergedChatGuids.toSet(), viewModelScope)
     }
 
     val composer: ChatComposerDelegate = composerFactory.create(

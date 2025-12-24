@@ -130,9 +130,11 @@ class SocketEventHandler @Inject constructor(
             }
 
             Timber.i("Socket connected - triggering incremental sync to catch missed messages")
+            Timber.tag("ConvoDebug").d("=== SOCKET CONNECTED - STARTING INCREMENTAL SYNC ===")
             syncService.get().performIncrementalSync()
                 .onSuccess {
                     Timber.i("Incremental sync on reconnect completed successfully")
+                    Timber.tag("ConvoDebug").d("=== INCREMENTAL SYNC COMPLETE ===")
                 }
                 .onFailure { e ->
                     Timber.e(e, "Incremental sync on reconnect failed")

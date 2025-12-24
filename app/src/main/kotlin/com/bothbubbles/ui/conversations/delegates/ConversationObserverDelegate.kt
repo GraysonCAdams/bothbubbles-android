@@ -145,6 +145,7 @@ class ConversationObserverDelegate @AssistedInject constructor(
             ) { _, _, _, _, _ -> Unit }
                 .debounce(100) // Reduced debounce for faster UI updates
                 .collect {
+                    Timber.tag("ConvoDebug").d("DataChanged triggered - emitting refresh event")
                     _events.emit(ConversationEvent.DataChanged)
                 }
         }

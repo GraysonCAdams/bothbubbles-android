@@ -135,7 +135,9 @@ fun MessageBubble(
     isSelected: Boolean = false,
     onSelectionToggle: (() -> Unit)? = null,
     // Social media video fullscreen - opens Reels feed
-    onOpenReelsFeed: (() -> Unit)? = null
+    onOpenReelsFeed: (() -> Unit)? = null,
+    // Avatar size for group chats (passed to bubble content for proper alignment)
+    avatarSize: androidx.compose.ui.unit.Dp = 28.dp
 ) {
     // Detect first URL in message text for link preview
     val firstUrl = remember(message.text) {
@@ -157,7 +159,6 @@ fun MessageBubble(
 
     // Show avatar for received messages in group chats
     val shouldShowAvatarSpace = isGroupChat && !message.isFromMe
-    val avatarSize = 28.dp
 
     // Wrap content in a column for the message content
     // Align based on whether this message (the reply) is from me
@@ -172,7 +173,8 @@ fun MessageBubble(
             onSelectionToggle?.invoke()
         }
 
-        // Main content row with optional avatar and selection indicator
+        // Main content row with selection indicator
+        // Avatar is now rendered inside bubble content components for proper alignment with bubble
         Row(
             verticalAlignment = Alignment.Bottom,
             modifier = Modifier
@@ -189,33 +191,6 @@ fun MessageBubble(
                     }
                 )
         ) {
-            // Avatar space for received messages in group chats
-            if (shouldShowAvatarSpace) {
-                if (showAvatar) {
-                    Avatar(
-                        name = message.senderName ?: "?",
-                        avatarPath = message.senderAvatarPath,
-                        size = avatarSize,
-                        modifier = Modifier
-                            .padding(end = 8.dp)
-                            .then(
-                                if (onAvatarClick != null) {
-                                    Modifier
-                                        .clickable(onClick = onAvatarClick)
-                                        .semantics {
-                                            onClick(label = "View ${message.senderName ?: "sender"} contact details") { true }
-                                        }
-                                } else {
-                                    Modifier
-                                }
-                            )
-                    )
-                } else {
-                    // Empty space to maintain alignment
-                    Spacer(modifier = Modifier.width(avatarSize + 8.dp))
-                }
-            }
-
             // Message content - disable media/link interactions in selection mode
             val effectiveOnMediaClick: (String) -> Unit = if (isSelectionMode) { _ -> } else onMediaClick
 
@@ -262,6 +237,11 @@ fun MessageBubble(
                     onReplyQuoteTap = onReplyQuoteTap,
                     onReplyQuoteLongPress = onReplyQuoteLongPress,
                     onOpenReelsFeed = onOpenReelsFeed,
+                    // Avatar props for proper alignment with bubble (not subtext)
+                    shouldShowAvatarSpace = shouldShowAvatarSpace,
+                    showAvatar = showAvatar,
+                    avatarSize = avatarSize,
+                    onAvatarClick = onAvatarClick,
                     modifier = Modifier.weight(1f)
                 )
             } else {
@@ -292,6 +272,11 @@ fun MessageBubble(
                     replyPreview = message.replyPreview,
                     onReplyQuoteTap = onReplyQuoteTap,
                     onReplyQuoteLongPress = onReplyQuoteLongPress,
+                    // Avatar props for proper alignment with bubble (not subtext)
+                    shouldShowAvatarSpace = shouldShowAvatarSpace,
+                    showAvatar = showAvatar,
+                    avatarSize = avatarSize,
+                    onAvatarClick = onAvatarClick,
                     modifier = Modifier.weight(1f)
                 )
             }

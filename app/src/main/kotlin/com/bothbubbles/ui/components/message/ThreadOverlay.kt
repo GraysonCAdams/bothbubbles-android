@@ -23,8 +23,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bothbubbles.ui.chat.ChatSendMode
 import com.bothbubbles.ui.chat.composer.AttachmentItem
@@ -33,6 +35,7 @@ import com.bothbubbles.ui.chat.composer.ComposerEvent
 import com.bothbubbles.ui.chat.composer.ComposerPanel
 import com.bothbubbles.ui.chat.composer.ComposerState
 import com.bothbubbles.ui.chat.delegates.ChatThreadDelegate
+import com.bothbubbles.ui.theme.BothBubblesTheme
 import java.util.UUID
 
 /**
@@ -106,12 +109,30 @@ fun ThreadOverlay(
             tonalElevation = 3.dp
         ) {
             Column {
-                // Header
+                // State for stacked reaction details modal
+                var selectedReaction by remember { mutableStateOf<Tapback?>(null) }
+                val groupedReactions = remember(threadChain.reactions) {
+                    threadChain.reactions.groupBy { it.tapback }
+                }
+
+                // Header with reactions
                 ThreadOverlayHeader(
                     messageCount = allMessages.size,
                     isRepliesOnly = isRepliesOnly,
+                    reactions = threadChain.reactions,
+                    onReactionClick = { tapback -> selectedReaction = tapback },
                     onClose = onDismiss
                 )
+
+                // Stacked bottom sheet for reaction details (shown on top of thread modal)
+                if (selectedReaction != null) {
+                    val reactionsList = groupedReactions[selectedReaction] ?: emptyList()
+                    StackedReactionDetailsSheet(
+                        tapback = selectedReaction!!,
+                        reactions = reactionsList,
+                        onDismiss = { selectedReaction = null }
+                    )
+                }
 
                 HorizontalDivider()
 
@@ -299,8 +320,16 @@ private fun ThreadComposerHost(
 private fun ThreadOverlayHeader(
     messageCount: Int,
     isRepliesOnly: Boolean = false,
+    reactions: List<ReactionUiModel> = emptyList(),
+    onReactionClick: (Tapback) -> Unit = {},
     onClose: () -> Unit
 ) {
+    // Group reactions by type
+    val groupedReactions = remember(reactions) {
+        reactions.groupBy { it.tapback }
+            .filter { it.value.isNotEmpty() }
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -308,7 +337,7 @@ private fun ThreadOverlayHeader(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Column {
+        Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = if (isRepliesOnly) "Replies" else "Thread",
                 style = MaterialTheme.typography.titleMedium
@@ -324,10 +353,130 @@ private fun ThreadOverlayHeader(
             )
         }
 
+        // Reaction badges in top right (only in Reels context - when we have reactions)
+        if (groupedReactions.isNotEmpty()) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(end = 8.dp)
+            ) {
+                groupedReactions.forEach { (tapback, reactionsList) ->
+                    HeaderReactionBadge(
+                        tapback = tapback,
+                        count = reactionsList.size,
+                        hasMyReaction = reactionsList.any { it.isFromMe },
+                        onClick = { onReactionClick(tapback) }
+                    )
+                }
+            }
+        }
+
         IconButton(onClick = onClose) {
             Icon(
                 imageVector = Icons.Default.Close,
                 contentDescription = "Close thread"
+            )
+        }
+    }
+}
+
+/**
+ * Reaction badge for the thread overlay header.
+ * Shows emoji and count, clickable to show who reacted.
+ */
+@Composable
+private fun HeaderReactionBadge(
+    tapback: Tapback,
+    count: Int,
+    hasMyReaction: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val backgroundColor = if (hasMyReaction) {
+        BothBubblesTheme.bubbleColors.iMessageSent
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHighest
+    }
+
+    val textColor = if (hasMyReaction) {
+        Color.White
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    Surface(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        color = backgroundColor,
+        tonalElevation = 2.dp,
+        shadowElevation = 1.dp
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            Text(
+                text = tapback.emoji,
+                fontSize = 14.sp
+            )
+            if (count > 1) {
+                Text(
+                    text = count.toString(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = textColor
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Stacked bottom sheet for showing reaction details.
+ * Shown on top of the thread overlay when a reaction badge is tapped.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun StackedReactionDetailsSheet(
+    tapback: Tapback,
+    reactions: List<ReactionUiModel>,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    // Build comma-separated list of names
+    val names = reactions.map { reaction ->
+        when {
+            reaction.isFromMe -> "You"
+            reaction.senderName != null -> reaction.senderName
+            else -> "Unknown"
+        }
+    }.joinToString(", ")
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface,
+        dragHandle = { BottomSheetDefaults.DragHandle() }
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 32.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = tapback.emoji,
+                fontSize = 28.sp
+            )
+            Spacer(modifier = Modifier.width(16.dp))
+            Text(
+                text = names,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface
             )
         }
     }

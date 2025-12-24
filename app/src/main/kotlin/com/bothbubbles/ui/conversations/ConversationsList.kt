@@ -245,6 +245,8 @@ private fun ConversationUiModel.toContactInfo(): ContactInfo = ContactInfo(
     address = address,
     isGroup = isGroup,
     participantNames = participantNames,
+    participantAvatarPaths = participantAvatarPaths,
+    chatAvatarPath = chatAvatarPath,
     hasContact = hasContact,
     hasInferredName = hasInferredName
 )

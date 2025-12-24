@@ -93,47 +93,51 @@ class ChatInfoDelegate @AssistedInject constructor(
             // Observe participants from all chats in merged conversation
             val participantsFlow = chatRepository.observeParticipantsForChats(mergedChatGuids)
 
-            // Combine chat with participants to resolve display name properly
+            // Observe unified chat for group photo (customAvatarPath > serverGroupPhotoPath)
+            val unifiedChatFlow = chatRepository.observeUnifiedChatForChat(chatGuid)
+
+            // Combine chat, participants, and unified chat to resolve all metadata
             combine(
                 chatRepository.observeChat(chatGuid),
-                participantsFlow
-            ) { chat, participants -> chat to participants }
-                .collect { (chat, participants) ->
-                    chat?.let {
-                        val chatTitle = chatRepository.resolveChatTitle(it, participants)
+                participantsFlow,
+                unifiedChatFlow
+            ) { chat, participants, unifiedChat ->
+                Triple(chat, participants, unifiedChat)
+            }.collect { (chat, participants, unifiedChat) ->
+                chat?.let {
+                    val chatTitle = chatRepository.resolveChatTitle(it, participants)
 
-                        // Load Discord channel ID for non-group chats
-                        val discordChannelId = if (!it.isGroup) {
-                            val address = it.chatIdentifier ?: participants.firstOrNull()?.address
-                            address?.let { addr -> discordContactService.getDiscordChannelId(addr) }
-                        } else null
+                    // Load Discord channel ID for non-group chats
+                    val discordChannelId = if (!it.isGroup) {
+                        val address = it.chatIdentifier ?: participants.firstOrNull()?.address
+                        address?.let { addr -> discordContactService.getDiscordChannelId(addr) }
+                    } else null
 
-                        // Group photo path now comes from UnifiedChatEntity - use null here as avatar
-                        // is resolved from participants. GroupPhotoPath lookup would require additional
-                        // unified chat query, but avatar fallback already handles this.
-                        val chatGroupPhotoPath: String? = null
+                    // Group photo path from UnifiedChatEntity (customAvatarPath > serverGroupPhotoPath)
+                    // This ensures the chat header matches the conversation list avatar
+                    val chatGroupPhotoPath = unifiedChat?.effectiveAvatarPath
 
-                        _state.update { state ->
-                            state.copy(
-                                chatTitle = chatTitle,
-                                isGroup = it.isGroup,
-                                avatarPath = participants.firstOrNull()?.cachedAvatarPath,
-                                groupPhotoPath = chatGroupPhotoPath,
-                                participantNames = participants.map { p -> p.displayName }.toStable(),
-                                participantAvatarPaths = participants.map { p -> p.cachedAvatarPath }.toStable(),
-                                participantAddresses = participants.map { p -> p.address }.toStable(),
-                                participantFirstNames = participants.map { p -> p.firstName }.toStable(),
-                                participantPhone = it.chatIdentifier,
-                                isLocalSmsChat = it.isLocalSms,
-                                isIMessageChat = it.isIMessage,
-                                smsInputBlocked = it.isSmsChat && !smsPermissionHelper.isDefaultSmsApp(),
-                                isSnoozed = false, // Snooze status now managed by UnifiedChatEntity via ChatOperationsDelegate
-                                snoozeUntil = null,
-                                discordChannelId = discordChannelId
-                            )
-                        }
+                    _state.update { state ->
+                        state.copy(
+                            chatTitle = chatTitle,
+                            isGroup = it.isGroup,
+                            avatarPath = participants.firstOrNull()?.cachedAvatarPath,
+                            groupPhotoPath = chatGroupPhotoPath,
+                            participantNames = participants.map { p -> p.displayName }.toStable(),
+                            participantAvatarPaths = participants.map { p -> p.cachedAvatarPath }.toStable(),
+                            participantAddresses = participants.map { p -> p.address }.toStable(),
+                            participantFirstNames = participants.map { p -> p.firstName }.toStable(),
+                            participantPhone = it.chatIdentifier,
+                            isLocalSmsChat = it.isLocalSms,
+                            isIMessageChat = it.isIMessage,
+                            smsInputBlocked = it.isSmsChat && !smsPermissionHelper.isDefaultSmsApp(),
+                            isSnoozed = false, // Snooze status now managed by UnifiedChatEntity via ChatOperationsDelegate
+                            snoozeUntil = null,
+                            discordChannelId = discordChannelId
+                        )
                     }
                 }
+            }
         }
     }
 
