@@ -145,6 +145,8 @@ fun NavGraphBuilder.chatNavigation(navController: NavHostController) {
         val route: Screen.Compose = backStackEntry.toRoute()
         val context = LocalContext.current
 
+        Timber.d("ChatNavigation: Screen.Compose route - sharedText='${route.sharedText}', sharedUris=${route.sharedUris.size}, initialAddress=${route.initialAddress}")
+
         ComposeScreen(
             onNavigateBack = {
                 // Try to pop back stack - if nothing to pop (opened from share intent),

@@ -140,6 +140,14 @@ class ComposeComposerDelegate @Inject constructor(
     ) {
         when (event) {
             is ComposerEvent.TextChanged -> {
+                // Protect against race condition: don't let empty text overwrite shared content
+                // during initialization. This happens when ComposerTextField's EditText fires
+                // a TextChanged('') before the StateFlow has propagated the shared content.
+                if (event.text.isEmpty() && _text.value.isNotEmpty()) {
+                    Timber.d("ComposeComposerDelegate: Ignoring empty TextChanged - preserving '${_text.value}'")
+                    return
+                }
+                Timber.d("ComposeComposerDelegate: TextChanged to '${event.text}'")
                 _text.value = event.text
             }
             is ComposerEvent.TextFieldFocusChanged -> {

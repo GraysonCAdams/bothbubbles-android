@@ -97,6 +97,9 @@ fun ComposerTextField(
     // Track line count to force height updates when text wraps
     var lineCount by remember { mutableIntStateOf(1) }
 
+    // Debug: Log incoming text prop
+    Timber.d("ComposerTextField composed with text='$text'")
+
     // Placeholder text based on send mode and enabled state
     val placeholderText = when {
         !isEnabled -> "Not default SMS app"
@@ -127,12 +130,16 @@ fun ComposerTextField(
 
     // Sync external text changes (e.g., when mention is inserted)
     LaunchedEffect(text) {
+        Timber.d("ComposerTextField: LaunchedEffect(text) - text='$text', editTextRef=${editTextRef != null}")
         editTextRef?.let { editText ->
-            if (editText.text.toString() != text) {
+            val currentText = editText.text.toString()
+            Timber.d("ComposerTextField: currentText='$currentText', needsSync=${currentText != text}")
+            if (currentText != text) {
                 // Preserve selection position or move to end
                 val wasAtEnd = editText.selectionEnd == editText.text.length
                 editText.setText(applyMentionSpans(text, mentions, mentionColor))
                 editText.setSelection(if (wasAtEnd) text.length else minOf(editText.selectionEnd, text.length))
+                Timber.d("ComposerTextField: synced text to EditText")
             }
         }
     }

@@ -2,8 +2,8 @@ package com.bothbubbles.ui.compose.delegates
 
 import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.UnifiedChatDao
-import com.bothbubbles.data.local.db.entity.ChatEntity
-import com.bothbubbles.core.model.entity.UnifiedChatEntity
+import com.bothbubbles.data.local.db.entity.HandleEntity
+import com.bothbubbles.data.local.db.entity.displayName
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.HandleRepository
 import com.bothbubbles.services.contacts.AndroidContactsService
@@ -18,8 +18,6 @@ import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.debounce
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -32,7 +30,7 @@ import javax.inject.Inject
  * - Loading contacts from Android contacts as fallback
  * - Loading group chats from database
  * - Filtering based on search query
- * - Deduplication (one row per contact, most recently used handle)
+ * - Deduplication (one row per contact per type - phone vs email)
  */
 class SuggestionDelegate @Inject constructor(
     private val chatRepository: ChatRepository,
@@ -51,7 +49,6 @@ class SuggestionDelegate @Inject constructor(
 
     private var allContacts: List<ContactEntry> = emptyList()
     private var allGroups: List<GroupEntry> = emptyList()
-    private var handleServiceMap: Map<String, String> = emptyMap()
     private var lastMessageDates: Map<String, Long> = emptyMap()
 
     private var scope: CoroutineScope? = null
@@ -62,13 +59,14 @@ class SuggestionDelegate @Inject constructor(
         val address: String,
         val normalizedAddress: String,
         val formattedAddress: String,
-        val service: String,
+        val isEmail: Boolean,
         val avatarPath: String?,
         val lastMessageDate: Long?
     )
 
     private data class GroupEntry(
         val chatGuid: String,
+        val unifiedChatId: String?,
         val displayName: String,
         val memberPreview: String,
         val avatarPath: String?
@@ -143,26 +141,6 @@ class SuggestionDelegate @Inject constructor(
 
     private suspend fun loadContactsAndGroups() {
         try {
-            // Load activity-based service map (most recent chat with messages wins)
-            val activityServiceMap = chatRepository.getServiceMapFromActiveChats()
-
-            // Build handle service map: activity-based, falling back to handle existence
-            val allHandles = handleRepository.getAllHandlesOnce()
-            handleServiceMap = mutableMapOf<String, String>().apply {
-                allHandles.forEach { handle ->
-                    val normalized = normalizeAddress(handle.address)
-                    // Priority 1: Use service from most recent ACTIVE chat (has messages)
-                    val activityService = activityServiceMap[normalized]
-                    if (activityService != null) {
-                        put(normalized, activityService)
-                    }
-                    // Priority 2: For handles with no active chat, default to SMS (phone) or iMessage (email)
-                    else if (!containsKey(normalized)) {
-                        put(normalized, if (handle.address.contains("@")) "iMessage" else "SMS")
-                    }
-                }
-            }
-
             // Load last message dates for deduplication
             lastMessageDates = chatRepository.getLastMessageDatePerAddress()
 
@@ -174,7 +152,6 @@ class SuggestionDelegate @Inject constructor(
                 // Add phone numbers
                 for (phone in contact.phoneNumbers) {
                     val normalized = normalizeAddress(phone)
-                    val service = handleServiceMap[normalized] ?: "SMS"
                     contactEntries.add(
                         ContactEntry(
                             contactId = contact.contactId,
@@ -182,7 +159,7 @@ class SuggestionDelegate @Inject constructor(
                             address = phone,
                             normalizedAddress = normalized,
                             formattedAddress = PhoneNumberFormatter.format(phone),
-                            service = service,
+                            isEmail = false,
                             avatarPath = contact.photoUri,
                             lastMessageDate = lastMessageDates[normalized]
                         )
@@ -198,7 +175,7 @@ class SuggestionDelegate @Inject constructor(
                             address = email,
                             normalizedAddress = normalized,
                             formattedAddress = email,
-                            service = "iMessage", // Emails are always iMessage
+                            isEmail = true,
                             avatarPath = contact.photoUri,
                             lastMessageDate = lastMessageDates[normalized]
                         )
@@ -206,21 +183,57 @@ class SuggestionDelegate @Inject constructor(
                 }
             }
 
-            // Deduplicate by normalized address, prefer iMessage
+            // Deduplicate by contactId + type (phone vs email)
+            // Each contact can appear once with phone and once with email
             allContacts = contactEntries
-                .groupBy { it.normalizedAddress }
+                .groupBy { Pair(it.contactId ?: it.normalizedAddress.hashCode().toLong(), it.isEmail) }
                 .map { (_, group) ->
-                    group.find { it.service == "iMessage" } ?: group.first()
+                    // Within each type, prefer most recently messaged
+                    val withMessages = group.filter { it.lastMessageDate != null }
+                    if (withMessages.isNotEmpty()) {
+                        withMessages.maxByOrNull { it.lastMessageDate!! } ?: group.first()
+                    } else {
+                        group.first()
+                    }
                 }
 
-            // Load group chats
+            // Load group chats with participants
             val groupChats = chatRepository.getRecentGroupChats().first()
-            allGroups = groupChats.map { chat ->
+            val chatGuids = groupChats.map { it.guid }
+
+            // Batch fetch participants for all groups
+            val participantsByChat = if (chatGuids.isNotEmpty()) {
+                chatRepository.getParticipantsGroupedByChat(chatGuids)
+            } else {
+                emptyMap()
+            }
+
+            // Build group entries with proper display names and avatars
+            // Deduplicate by unifiedChatId
+            val seenUnifiedIds = mutableSetOf<String>()
+            allGroups = groupChats.mapNotNull { chat ->
+                // Skip if we've already seen this unified chat
+                val unifiedId = chat.unifiedChatId
+                if (unifiedId != null && !seenUnifiedIds.add(unifiedId)) {
+                    return@mapNotNull null
+                }
+
+                val participants = participantsByChat[chat.guid] ?: emptyList()
+
+                // Get avatar from chat's server group photo or unified chat
+                val avatarPath = chat.serverGroupPhotoPath
+                    ?: unifiedId?.let { unifiedChatDao.getById(it)?.effectiveAvatarPath }
+
+                // Build display name from participants if no explicit name
+                val displayName = chat.displayName?.takeIf { it.isNotBlank() }
+                    ?: buildParticipantDisplayName(participants)
+
                 GroupEntry(
                     chatGuid = chat.guid,
-                    displayName = chat.displayName ?: chat.chatIdentifier ?: "Group Chat",
-                    memberPreview = buildMemberPreview(chat),
-                    avatarPath = null // Group photo now stored in UnifiedChatEntity
+                    unifiedChatId = unifiedId,
+                    displayName = displayName,
+                    memberPreview = buildMemberPreview(participants),
+                    avatarPath = avatarPath
                 )
             }
 
@@ -249,23 +262,14 @@ class SuggestionDelegate @Inject constructor(
             val unifiedChats = unifiedChatDao.search(query, MAX_UNIFIED_SUGGESTIONS)
             Timber.d("Found ${unifiedChats.size} unified chats")
             for (chat in unifiedChats) {
+                // Skip group chats from unified search - they're handled separately
+                if (chat.isGroup) continue
+
                 matchedIdentifiers.add(chat.normalizedAddress)
 
                 // Look up handle for avatar (prefer any handle with avatar)
                 val handles = handleRepository.getHandlesByAddress(chat.normalizedAddress)
                 val handle = handles.firstOrNull { it.cachedAvatarPath != null } ?: handles.firstOrNull()
-
-                // Determine service using activity-based logic (same as ContactLoadDelegate)
-                // Priority: handleServiceMap (activity-based) > sourceId prefix > SMS default
-                val normalizedIdentifier = normalizeAddress(chat.normalizedAddress)
-                val activityService = handleServiceMap[normalizedIdentifier]
-                val service = when {
-                    activityService != null -> activityService
-                    chat.sourceId.startsWith("iMessage", ignoreCase = true) -> "iMessage"
-                    chat.sourceId.startsWith("RCS", ignoreCase = true) -> "RCS"
-                    else -> "SMS"
-                }
-                Timber.d("Unified chat service determination: identifier=${chat.normalizedAddress}, activityService=$activityService, service=$service")
 
                 // Get display name from:
                 // 1. Unified chat displayName
@@ -283,7 +287,7 @@ class SuggestionDelegate @Inject constructor(
                         displayName = displayName,
                         address = chat.normalizedAddress,
                         formattedAddress = PhoneNumberFormatter.format(chat.normalizedAddress),
-                        service = service,
+                        service = "", // No longer used
                         avatarPath = chat.effectiveAvatarPath ?: handle?.cachedAvatarPath,
                         chatGuid = chat.sourceId
                     )
@@ -302,14 +306,14 @@ class SuggestionDelegate @Inject constructor(
                     contact.address.contains(query, ignoreCase = true) ||
                     contact.formattedAddress.contains(query, ignoreCase = true))
             }
-            // Deduplicate by contactId, prefer most recently used handle
-            .groupBy { it.contactId ?: it.normalizedAddress.hashCode().toLong() }
+            // Deduplicate by contactId + type
+            .groupBy { Pair(it.contactId ?: it.normalizedAddress.hashCode().toLong(), it.isEmail) }
             .map { (_, group) ->
                 val withMessages = group.filter { it.lastMessageDate != null }
                 if (withMessages.isNotEmpty()) {
-                    withMessages.maxByOrNull { it.lastMessageDate!! }!!
+                    withMessages.maxByOrNull { it.lastMessageDate!! } ?: group.first()
                 } else {
-                    group.find { it.service == "iMessage" } ?: group.first()
+                    group.first()
                 }
             }
             .take(MAX_CONTACT_SUGGESTIONS - results.size.coerceAtMost(MAX_CONTACT_SUGGESTIONS))
@@ -320,7 +324,7 @@ class SuggestionDelegate @Inject constructor(
                 displayName = contact.displayName,
                 address = contact.address,
                 formattedAddress = contact.formattedAddress,
-                service = contact.service,
+                service = "", // No longer used
                 avatarPath = contact.avatarPath
             )
         })
@@ -365,9 +369,41 @@ class SuggestionDelegate @Inject constructor(
         }
     }
 
-    private fun buildMemberPreview(chat: ChatEntity): String {
-        // For now, just return a placeholder. Could enhance with actual participant lookup.
-        return chat.chatIdentifier ?: "Group members"
+    /**
+     * Build display name for a group chat from participant names.
+     * Format: "Name1, Name2, +N others" to fit in a single line.
+     */
+    private fun buildParticipantDisplayName(participants: List<HandleEntity>): String {
+        if (participants.isEmpty()) return "Group Chat"
+
+        val names = participants.map { it.displayName }
+        return when {
+            names.size <= 2 -> names.joinToString(", ")
+            else -> {
+                // Show first 2 names + others count
+                val firstTwo = names.take(2).joinToString(", ")
+                val othersCount = names.size - 2
+                "$firstTwo, +$othersCount others"
+            }
+        }
+    }
+
+    /**
+     * Build member preview for a group chat (shown as subtitle).
+     * Shows as many names as possible with "+N others" format.
+     */
+    private fun buildMemberPreview(participants: List<HandleEntity>): String {
+        if (participants.isEmpty()) return "No members"
+
+        val names = participants.map { it.displayName }
+        return when {
+            names.size <= 3 -> names.joinToString(", ")
+            else -> {
+                val firstThree = names.take(3).joinToString(", ")
+                val othersCount = names.size - 3
+                "$firstThree, +$othersCount others"
+            }
+        }
     }
 
     companion object {

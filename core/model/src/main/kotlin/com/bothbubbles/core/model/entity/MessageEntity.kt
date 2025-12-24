@@ -28,7 +28,9 @@ import androidx.room.PrimaryKey
         Index(value = ["chat_guid", "is_reaction", "date_created", "guid"]),
         // Unified chat pagination indexes - enables native LIMIT/OFFSET across merged conversations
         Index(value = ["unified_chat_id", "date_created", "date_deleted", "guid"]),
-        Index(value = ["unified_chat_id", "is_reaction", "date_created", "guid"])
+        Index(value = ["unified_chat_id", "is_reaction", "date_created", "guid"]),
+        // Index for querying link embed messages
+        Index(value = ["is_link_embed"])
     ],
     foreignKeys = [
         ForeignKey(

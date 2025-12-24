@@ -167,8 +167,6 @@ private fun ContactSuggestionRow(
             )
         }
 
-        // Service indicator
-        ServiceIndicator(service = suggestion.service)
     }
 }
 
@@ -221,24 +219,16 @@ private fun GroupSuggestionRow(
 
         Spacer(modifier = Modifier.width(12.dp))
 
-        // Name and member preview
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = suggestion.displayName,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = suggestion.memberPreview,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
+        // Name only (no subtitle for groups)
+        Text(
+            text = suggestion.displayName,
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
+        )
 
         // Chevron indicating it's expandable/selectable
         Icon(
@@ -248,24 +238,4 @@ private fun GroupSuggestionRow(
             tint = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
-}
-
-/**
- * Small badge showing the service type (iMessage/SMS).
- */
-@Composable
-private fun ServiceIndicator(service: String) {
-    val isIMessage = service.equals("iMessage", ignoreCase = true)
-    val color = if (isIMessage) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.tertiary
-    }
-
-    Text(
-        text = if (isIMessage) "iMessage" else "SMS",
-        style = MaterialTheme.typography.labelSmall,
-        color = color,
-        fontWeight = FontWeight.Medium
-    )
 }

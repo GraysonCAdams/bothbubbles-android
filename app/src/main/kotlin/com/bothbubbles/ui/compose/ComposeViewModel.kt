@@ -274,8 +274,11 @@ class ComposeViewModel @Inject constructor(
      * Call this when navigating to ComposeScreen with shared content.
      */
     fun setSharedContent(text: String?, uris: List<android.net.Uri>) {
+        Timber.d("setSharedContent called: text='$text', uris=${uris.size}")
         if (text != null) {
+            Timber.d("setSharedContent: dispatching TextChanged event")
             composerDelegate.onComposerEvent(ComposerEvent.TextChanged(text), onSend = {})
+            Timber.d("setSharedContent: after dispatch, delegate text='${composerDelegate.getText()}'")
         }
         if (uris.isNotEmpty()) {
             composerDelegate.onComposerEvent(ComposerEvent.AddAttachments(uris), onSend = {})

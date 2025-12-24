@@ -1658,6 +1658,69 @@ object DatabaseMigrations {
     }
 
     /**
+     * Migration 59→60: Ensure link embed columns exist (repair migration).
+     *
+     * This migration safely adds the link embed columns if they don't already exist.
+     * This handles cases where:
+     * - The database was at version 59 before migration 58→59 was added
+     * - A previous build bumped the version without adding the columns
+     *
+     * Uses PRAGMA table_info to check for existing columns before adding.
+     */
+    val MIGRATION_59_60 = object : Migration(59, 60) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            Timber.i("Starting migration 59→60: Ensure link embed columns exist")
+
+            // Check existing columns in messages table
+            val messageColumns = mutableSetOf<String>()
+            db.query("PRAGMA table_info(messages)").use { cursor ->
+                val nameIndex = cursor.getColumnIndex("name")
+                while (cursor.moveToNext()) {
+                    messageColumns.add(cursor.getString(nameIndex))
+                }
+            }
+
+            // Add is_link_embed to messages if missing
+            if ("is_link_embed" !in messageColumns) {
+                db.execSQL("ALTER TABLE messages ADD COLUMN is_link_embed INTEGER NOT NULL DEFAULT 0")
+                Timber.d("Added is_link_embed column to messages")
+            }
+
+            // Add link_embed_url to messages if missing
+            if ("link_embed_url" !in messageColumns) {
+                db.execSQL("ALTER TABLE messages ADD COLUMN link_embed_url TEXT DEFAULT NULL")
+                Timber.d("Added link_embed_url column to messages")
+            }
+
+            // Create index if not exists (idempotent)
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_messages_is_link_embed ON messages(is_link_embed)")
+
+            // Check existing columns in pending_messages table
+            val pendingColumns = mutableSetOf<String>()
+            db.query("PRAGMA table_info(pending_messages)").use { cursor ->
+                val nameIndex = cursor.getColumnIndex("name")
+                while (cursor.moveToNext()) {
+                    pendingColumns.add(cursor.getString(nameIndex))
+                }
+            }
+
+            // Add is_link_embed to pending_messages if missing
+            if ("is_link_embed" !in pendingColumns) {
+                db.execSQL("ALTER TABLE pending_messages ADD COLUMN is_link_embed INTEGER NOT NULL DEFAULT 0")
+                Timber.d("Added is_link_embed column to pending_messages")
+            }
+
+            // Add link_embed_url to pending_messages if missing
+            if ("link_embed_url" !in pendingColumns) {
+                db.execSQL("ALTER TABLE pending_messages ADD COLUMN link_embed_url TEXT DEFAULT NULL")
+                Timber.d("Added link_embed_url column to pending_messages")
+            }
+
+            Timber.i("Migration 59→60 complete: Link embed columns verified")
+        }
+    }
+
+    /**
      * List of all migrations for use with databaseBuilder.
      *
      * IMPORTANT: Always add new migrations to this array!
@@ -1721,6 +1784,7 @@ object DatabaseMigrations {
         MIGRATION_55_56,
         MIGRATION_56_57,
         MIGRATION_57_58,
-        MIGRATION_58_59
+        MIGRATION_58_59,
+        MIGRATION_59_60
     )
 }

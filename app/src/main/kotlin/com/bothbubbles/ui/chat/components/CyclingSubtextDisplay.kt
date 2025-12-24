@@ -6,8 +6,6 @@ import android.provider.CalendarContract
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
@@ -58,8 +56,21 @@ fun CyclingSubtextDisplay(
 
     val currentContent = state.currentContent ?: return
 
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
+    // Animated content with icon and text together (crossfade)
+    AnimatedContent(
+        targetState = currentContent,
+        transitionSpec = {
+            // Crossfade animation
+            fadeIn(
+                animationSpec = tween(MotionTokens.Duration.MEDIUM_1)
+            ).togetherWith(
+                fadeOut(
+                    animationSpec = tween(MotionTokens.Duration.MEDIUM_1)
+                )
+            )
+        },
+        contentKey = { "${it.sourceId}:${it.text}" },
+        label = "cyclingSubtext",
         modifier = modifier
             .clipToBounds()
             .clickable {
@@ -80,51 +91,33 @@ fun CyclingSubtextDisplay(
                 contentDescription = currentContent.text
                 liveRegion = LiveRegionMode.Polite
             }
-    ) {
-        // Icon
-        currentContent.icon?.let { icon ->
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(14.dp)
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-        }
-
-        // Animated text content
-        AnimatedContent(
-            targetState = currentContent,
-            transitionSpec = {
-                // Vertical slide animation
-                (slideInVertically(
-                    animationSpec = tween(
-                        durationMillis = MotionTokens.Duration.MEDIUM_1,
-                        easing = MotionTokens.Easing.EmphasizedDecelerate
-                    ),
-                    initialOffsetY = { fullHeight -> fullHeight }
-                ) + fadeIn(
-                    animationSpec = tween(MotionTokens.Duration.SHORT_4)
-                )).togetherWith(
-                    slideOutVertically(
-                        animationSpec = tween(
-                            durationMillis = MotionTokens.Duration.MEDIUM_1,
-                            easing = MotionTokens.Easing.EmphasizedAccelerate
-                        ),
-                        targetOffsetY = { fullHeight -> -fullHeight }
-                    ) + fadeOut(
-                        animationSpec = tween(MotionTokens.Duration.SHORT_4)
-                    )
+    ) { content ->
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Icon - now inside AnimatedContent so it slides with text
+            content.icon?.let { icon ->
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(14.dp)
                 )
-            },
-            contentKey = { "${it.sourceId}:${it.text}" },
-            label = "cyclingSubtext",
-            modifier = Modifier.weight(1f, fill = false)
-        ) { content ->
+                Spacer(modifier = Modifier.width(4.dp))
+            }
+
+            // Marquee text with scroll complete callback
             MarqueeText(
                 text = content.text,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                noScrollDelayMs = 10_000L,
+                onScrollComplete = {
+                    // Cycle to next content after marquee completes full cycle (or after 10 sec if no scroll)
+                    if (state.hasMultipleItems) {
+                        delegate.advanceCycle()
+                    }
+                }
             )
         }
     }

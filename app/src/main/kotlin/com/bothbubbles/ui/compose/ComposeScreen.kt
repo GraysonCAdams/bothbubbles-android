@@ -73,6 +73,7 @@ fun ComposeScreen(
 
     // Handle shared content from share intents
     LaunchedEffect(sharedText, sharedUris) {
+        timber.log.Timber.d("ComposeScreen LaunchedEffect: sharedText=$sharedText, sharedUris=${sharedUris.size}")
         if (sharedText != null || sharedUris.isNotEmpty()) {
             viewModel.setSharedContent(sharedText, sharedUris)
         }
