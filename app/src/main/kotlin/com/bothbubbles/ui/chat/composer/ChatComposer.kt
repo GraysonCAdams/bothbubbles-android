@@ -48,33 +48,33 @@ import com.bothbubbles.ui.chat.components.ChatPreviewPanel
 import com.bothbubbles.ui.chat.ChatSendMode
 import com.bothbubbles.ui.chat.components.SendButton
 import com.bothbubbles.ui.chat.components.VoiceMemoButton
+import com.bothbubbles.ui.chat.composer.components.AttachmentThumbnailRow
 import com.bothbubbles.ui.chat.composer.components.ComposerActionButtons
 import com.bothbubbles.ui.chat.composer.components.ComposerMediaButtons
 import com.bothbubbles.ui.chat.composer.components.ComposerSendButton
 import com.bothbubbles.ui.chat.composer.components.ComposerTextField
 import com.bothbubbles.ui.chat.composer.components.MentionPopup
 import com.bothbubbles.ui.chat.composer.components.ReplyPreviewBar
-import com.bothbubbles.ui.chat.composer.components.SegmentedComposer
 import com.bothbubbles.ui.chat.composer.components.SmartReplyRow
 import com.bothbubbles.ui.chat.composer.panels.ComposerPanelHost
 import com.bothbubbles.ui.theme.BothBubblesTheme
 import timber.log.Timber
 
 /**
- * Main chat composer component following iMessage/Google Messages design patterns.
+ * Main chat composer component following Google Messages design patterns.
  *
  * This is the orchestrating component that combines:
- * - Segmented composer for inline embeds (media, links, locations)
  * - Text input field with dynamic placeholder
  * - Left-side action button (add attachments)
  * - Right-side media buttons (camera, emoji, gallery)
  * - Send/voice memo button
+ * - Attachment preview strip
  * - Recording and preview modes
  *
- * Layout structure:
+ * Layout structure (Google Messages style):
  * ```
  * ┌──────────────────────────────────────────────────────────────┐
- * │ [SegmentedComposer - inline embed cards if present]          │
+ * │ [Attachment Thumbnails Row - if attachments selected]        │
  * ├──────────────────────────────────────────────────────────────┤
  * │ ╭────────────────────────────────────────────────────────╮   │
  * │ │ [+] │ Message text input...            [📷] [😊] [🖼] │   │
@@ -187,20 +187,17 @@ fun ChatComposer(
                 onDismiss = { onEvent(ComposerEvent.DismissReply) }
             )
 
-            // Segmented composer for inline embeds (media, links, locations)
-            if (state.inputMode == ComposerInputMode.TEXT && state.hasEmbeds) {
-                SegmentedComposer(
-                    document = state.document,
-                    onTextChanged = { segmentId, text ->
-                        onEvent(ComposerEvent.UpdateTextSegment(segmentId, text))
-                    },
-                    onRemoveSegment = { segmentId ->
-                        onEvent(ComposerEvent.RemoveSegment(segmentId))
-                    },
-                    onBackspaceAtStart = { segmentId ->
-                        onEvent(ComposerEvent.BackspaceAtSegmentStart(segmentId))
-                    },
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+            // Attachment thumbnails row with drag-and-drop reordering
+            if (state.inputMode == ComposerInputMode.TEXT) {
+                AttachmentThumbnailRow(
+                    attachments = state.attachments,
+                    onRemove = { onEvent(ComposerEvent.RemoveAttachment(it)) },
+                    onEdit = { onEvent(ComposerEvent.EditAttachment(it)) },
+                    onReorder = { reorderedList -> onEvent(ComposerEvent.ReorderAttachments(reorderedList)) },
+                    onClearAll = { onEvent(ComposerEvent.ClearAllAttachments) },
+                    onQualityClick = { onEvent(ComposerEvent.OpenQualitySheet) },
+                    currentQuality = state.currentImageQuality.name.lowercase()
+                        .replaceFirstChar { it.uppercase() }
                 )
             }
 
