@@ -1,5 +1,10 @@
 package com.bothbubbles.ui.chat
 
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -17,6 +22,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
@@ -224,16 +230,30 @@ private fun ChatTopBarContent(
             } else {
                 // Reels button - shown for all chats when enabled and has videos
                 // Shows badge with unwatched count in bottom-right, dropdown menu if unwatched exist
+                // Pulses and uses active color when there are unwatched reels
                 if (reelsFeedEnabled && hasReelVideos) {
                     var showReelsMenu = remember { mutableStateOf(false) }
+                    val hasUnwatched = unwatchedReelsCount > 0
+
+                    // Pulse animation for unwatched reels
+                    val infiniteTransition = rememberInfiniteTransition(label = "reels_pulse")
+                    val pulseScale by infiniteTransition.animateFloat(
+                        initialValue = 1f,
+                        targetValue = if (hasUnwatched) 1.15f else 1f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(800),
+                            repeatMode = RepeatMode.Reverse
+                        ),
+                        label = "reels_pulse_scale"
+                    )
 
                     Box {
                         BadgedBox(
                             badge = {
-                                if (unwatchedReelsCount > 0) {
+                                if (hasUnwatched) {
                                     Badge(
-                                        containerColor = MaterialTheme.colorScheme.error,
-                                        contentColor = MaterialTheme.colorScheme.onError,
+                                        containerColor = MaterialTheme.colorScheme.onSurface,
+                                        contentColor = MaterialTheme.colorScheme.surface,
                                         modifier = Modifier.semantics {
                                             contentDescription = "$unwatchedReelsCount unwatched reels"
                                         }
@@ -249,14 +269,27 @@ private fun ChatTopBarContent(
                             IconButton(
                                 onClick = {
                                     // If unwatched exist, show dropdown menu; otherwise go straight to all reels
-                                    if (unwatchedReelsCount > 0) {
+                                    if (hasUnwatched) {
                                         showReelsMenu.value = true
                                     } else {
                                         onReelsClick(false)
                                     }
                                 }
                             ) {
-                                Icon(Icons.Default.Subscriptions, contentDescription = "Reels feed")
+                                Icon(
+                                    Icons.Default.Subscriptions,
+                                    contentDescription = "Reels feed",
+                                    tint = if (hasUnwatched) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        LocalContentColor.current
+                                    },
+                                    modifier = if (hasUnwatched) {
+                                        Modifier.scale(pulseScale)
+                                    } else {
+                                        Modifier
+                                    }
+                                )
                             }
                         }
 
