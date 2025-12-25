@@ -32,6 +32,7 @@ import com.bothbubbles.ui.navigation.BothBubblesNavHost
 import com.bothbubbles.ui.navigation.NotificationDeepLinkData
 import com.bothbubbles.ui.navigation.Screen
 import com.bothbubbles.ui.navigation.ShareIntentData
+import com.bothbubbles.ui.navigation.ShortcutNavigation
 import com.bothbubbles.ui.navigation.StateRestorationData
 import com.bothbubbles.services.notifications.NotificationChannelManager
 import com.bothbubbles.services.notifications.NotificationService
@@ -87,8 +88,12 @@ class MainActivity : ComponentActivity() {
         // Parse share intent data
         val shareIntentData = parseShareIntent(intent)
 
-        // Parse notification deep link data (when user taps a notification)
+        // Parse deep link data (notification tap or URL-based deep link)
         val notificationDeepLinkData = parseNotificationDeepLink(intent)
+            ?: parseUrlDeepLink(intent)
+
+        // Parse launcher shortcut navigation (e.g., "New Message" from long-press menu)
+        val shortcutNavigation = parseShortcutNavigation(intent)
 
         // Check crash protection and get state restoration data synchronously
         // This needs to happen before setting content to determine start destination
@@ -96,9 +101,9 @@ class MainActivity : ComponentActivity() {
         val stateRestorationData = runBlocking {
             withTimeoutOrNull(2000L) {
                 val shouldSkipRestore = settingsDataStore.recordLaunchAndCheckCrashProtection()
-                Timber.tag("StateRestore").d("shouldSkipRestore=$shouldSkipRestore, shareIntent=${shareIntentData != null}, notificationDeepLink=${notificationDeepLinkData != null}")
-                if (shouldSkipRestore || shareIntentData != null || notificationDeepLinkData != null) {
-                    // Skip restoration if crash protection triggered, handling share intent, or notification deep link
+                Timber.tag("StateRestore").d("shouldSkipRestore=$shouldSkipRestore, shareIntent=${shareIntentData != null}, notificationDeepLink=${notificationDeepLinkData != null}, shortcut=${shortcutNavigation != null}")
+                if (shouldSkipRestore || shareIntentData != null || notificationDeepLinkData != null || shortcutNavigation != null) {
+                    // Skip restoration if crash protection triggered, handling share intent, notification deep link, or shortcut
                     Timber.tag("StateRestore").d("Skipping restoration")
                     null
                 } else {
@@ -141,7 +146,8 @@ class MainActivity : ComponentActivity() {
                         isSetupComplete = isSetupComplete,
                         shareIntentData = shareIntentData,
                         stateRestorationData = stateRestorationData,
-                        notificationDeepLinkData = notificationDeepLinkData
+                        notificationDeepLinkData = notificationDeepLinkData,
+                        shortcutNavigation = shortcutNavigation
                     )
 
                     // Developer mode connection overlay
@@ -167,6 +173,20 @@ class MainActivity : ComponentActivity() {
         val shareIntentData = parseShareIntent(intent)
         if (shareIntentData != null) {
             // Recreate to handle the new share intent
+            recreate()
+            return
+        }
+        // Handle URL deep links when activity is already running
+        val urlDeepLink = parseUrlDeepLink(intent)
+        if (urlDeepLink != null) {
+            // Recreate to handle the deep link navigation
+            recreate()
+            return
+        }
+        // Handle launcher shortcut when activity is already running
+        val shortcutNavigation = parseShortcutNavigation(intent)
+        if (shortcutNavigation != null) {
+            // Recreate to handle the shortcut navigation
             recreate()
         }
     }
@@ -396,6 +416,64 @@ class MainActivity : ComponentActivity() {
             messageGuid = messageGuid,
             mergedGuids = mergedGuids
         )
+    }
+
+    /**
+     * Parse URL-based deep links (bothbubbles:// scheme).
+     *
+     * Supported formats:
+     * - bothbubbles://chat/{chatGuid}
+     * - bothbubbles://chat/{chatGuid}?message={messageGuid}
+     *
+     * Used for:
+     * - Google Tasks reminders with deep link back to specific message
+     * - External app integrations
+     */
+    private fun parseUrlDeepLink(intent: Intent?): NotificationDeepLinkData? {
+        if (intent == null) return null
+        if (intent.action != Intent.ACTION_VIEW) return null
+
+        val uri = intent.data ?: return null
+        if (uri.scheme != "bothbubbles") return null
+
+        return when (uri.host) {
+            "chat" -> {
+                val chatGuid = uri.pathSegments.firstOrNull()
+                    ?.takeIf { it.isNotBlank() } ?: return null
+                val messageGuid = uri.getQueryParameter("message")
+                    ?.takeIf { it.isNotBlank() }
+
+                Timber.d("URL deep link: chatGuid=$chatGuid, messageGuid=$messageGuid")
+
+                NotificationDeepLinkData(
+                    chatGuid = chatGuid,
+                    messageGuid = messageGuid
+                )
+            }
+            else -> {
+                Timber.w("Unknown deep link host: ${uri.host}")
+                null
+            }
+        }
+    }
+
+    /**
+     * Parse launcher shortcut navigation from intent.
+     * Handles static shortcuts defined in shortcuts.xml (e.g., "New Message").
+     */
+    private fun parseShortcutNavigation(intent: Intent?): ShortcutNavigation? {
+        if (intent == null) return null
+        if (intent.action != Intent.ACTION_VIEW) return null
+
+        val navigateTo = intent.getStringExtra("navigate_to") ?: return null
+
+        return when (navigateTo) {
+            "compose" -> ShortcutNavigation.COMPOSE
+            else -> {
+                Timber.w("Unknown shortcut navigation target: $navigateTo")
+                null
+            }
+        }
     }
 
     /**

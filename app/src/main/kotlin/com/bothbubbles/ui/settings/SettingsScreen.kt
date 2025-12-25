@@ -43,11 +43,11 @@ import com.bothbubbles.core.network.api.dto.FindMyFriendDto
 import kotlinx.coroutines.launch
 import com.bothbubbles.services.sound.SoundTheme
 import com.bothbubbles.ui.settings.components.BadgeStatus
-import com.bothbubbles.ui.settings.components.MessagingSectionHeader
 import com.bothbubbles.ui.settings.components.SettingsCard
 import com.bothbubbles.ui.settings.components.SettingsMenuItem
 import com.bothbubbles.ui.settings.components.SettingsSectionTitle
 import com.bothbubbles.ui.settings.components.SettingsSwitch
+import com.bothbubbles.ui.settings.components.StatusBadge
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -234,7 +234,8 @@ fun SettingsContent(
             contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp)
         ) {
         // ═══════════════════════════════════════════════════════════════
-        // SECTION 1: Connection Status Header
+        // SECTION 1: Connectivity
+        // Focus: The "pipes" that make the app work
         // ═══════════════════════════════════════════════════════════════
         item {
             val iMessageStatus = when (uiState.connectionState) {
@@ -248,20 +249,35 @@ fun SettingsContent(
                 else -> BadgeStatus.ERROR  // Enabled but needs setup
             }
 
-            MessagingSectionHeader(
-                iMessageStatus = iMessageStatus,
-                smsStatus = smsStatus,
-                onIMessageClick = onServerSettingsClick,
-                onSmsClick = onSmsSettingsClick
-            )
-        }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Connectivity",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary
+                )
 
-        // ═══════════════════════════════════════════════════════════════
-        // SECTION 2: Connection & Server
-        // Focus: The "pipes" that make the app work
-        // ═══════════════════════════════════════════════════════════════
-        item {
-            SettingsSectionTitle(title = "Connection & server")
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    StatusBadge(
+                        label = "iMessage",
+                        status = iMessageStatus,
+                        onClick = onServerSettingsClick
+                    )
+                    StatusBadge(
+                        label = "SMS",
+                        status = smsStatus,
+                        onClick = onSmsSettingsClick
+                    )
+                }
+            }
         }
 
         item {

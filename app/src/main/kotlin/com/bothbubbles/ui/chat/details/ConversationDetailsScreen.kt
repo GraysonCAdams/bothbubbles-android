@@ -54,6 +54,7 @@ fun ConversationDetailsScreen(
     onNavigateBack: () -> Unit,
     onSearchClick: () -> Unit = {},
     onMediaGalleryClick: (mediaType: String) -> Unit = {},
+    onStarredMessagesClick: () -> Unit = {},
     onNotificationSettingsClick: () -> Unit = {},
     onCreateGroupClick: (address: String, displayName: String, service: String, avatarPath: String?) -> Unit = { _, _, _, _ -> },
     onLife360MapClick: (participantAddress: String) -> Unit = {},
@@ -61,6 +62,7 @@ fun ConversationDetailsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val actionState by viewModel.actionState.collectAsStateWithLifecycle()
+    val starredMessageCount by viewModel.starredMessageCount.collectAsStateWithLifecycle()
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showSnoozeDialog by remember { mutableStateOf(false) }
     var showBlockDialog by remember { mutableStateOf(false) }
@@ -178,6 +180,7 @@ fun ConversationDetailsScreen(
                             participantNames = uiState.participants.map { it.displayName },
                             participantAvatars = uiState.participants.map { it.cachedAvatarPath },
                             avatarPath = avatarPath,
+                            hasContactInfo = uiState.participants.firstOrNull()?.cachedDisplayName != null,
                             size = 40.dp
                         )
                         Spacer(modifier = Modifier.width(12.dp))
@@ -249,6 +252,7 @@ fun ConversationDetailsScreen(
                         participantNames = uiState.participants.map { it.displayName },
                         participantAvatars = uiState.participants.map { it.cachedAvatarPath },
                         avatarPath = headerAvatarPath,
+                        hasContactInfo = uiState.participants.firstOrNull()?.cachedDisplayName != null,
                         modifier = Modifier.alpha(headerAlpha)
                     )
                 }
@@ -334,6 +338,14 @@ fun ConversationDetailsScreen(
                         recentImages = uiState.recentImages,
                         onImagesClick = { onMediaGalleryClick("images") },
                         onVideosLinksClick = { onMediaGalleryClick("all") }
+                    )
+                }
+
+                // Starred messages section (only shown when there are starred messages)
+                item {
+                    StarredMessagesSection(
+                        starredCount = starredMessageCount,
+                        onStarredClick = onStarredMessagesClick
                     )
                 }
 

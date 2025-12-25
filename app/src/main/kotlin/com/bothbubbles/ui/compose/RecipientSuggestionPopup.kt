@@ -143,7 +143,8 @@ private fun ContactSuggestionRow(
         Avatar(
             name = suggestion.displayName,
             avatarPath = suggestion.avatarPath,
-            size = 40.dp
+            size = 40.dp,
+            hasContactInfo = suggestion.contactId != null
         )
 
         Spacer(modifier = Modifier.width(12.dp))
@@ -198,7 +199,8 @@ private fun GroupSuggestionRow(
             Avatar(
                 name = suggestion.displayName,
                 avatarPath = suggestion.avatarPath,
-                size = 40.dp
+                size = 40.dp,
+                hasContactInfo = true // Group with custom photo
             )
         } else {
             Surface(

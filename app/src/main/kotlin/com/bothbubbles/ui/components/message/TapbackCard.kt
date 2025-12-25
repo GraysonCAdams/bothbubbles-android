@@ -20,9 +20,13 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.ForwardToInbox
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Quickreply
+import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -71,10 +75,14 @@ fun TapbackCard(
     canReply: Boolean = false,
     canCopy: Boolean = true,
     canForward: Boolean = true,
+    isPinned: Boolean = false,
+    isStarred: Boolean = false,
     onReactionSelected: (Tapback) -> Unit,
     onReply: () -> Unit = {},
     onCopy: () -> Unit = {},
     onForward: () -> Unit = {},
+    onPin: () -> Unit = {},
+    onStar: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val haptics = LocalHapticFeedback.current
@@ -186,6 +194,18 @@ fun TapbackCard(
                         onClick = onForward
                     )
                 }
+
+                TapbackAction(
+                    icon = if (isPinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
+                    label = if (isPinned) "Unpin" else "Pin",
+                    onClick = onPin
+                )
+
+                TapbackAction(
+                    icon = if (isStarred) Icons.Filled.Star else Icons.Outlined.StarBorder,
+                    label = if (isStarred) "Unstar" else "Star",
+                    onClick = onStar
+                )
             }
         }
     }
@@ -289,8 +309,12 @@ private fun TapbackAction(
 fun ActionOnlyCard(
     canCopy: Boolean = true,
     canForward: Boolean = true,
+    isPinned: Boolean = false,
+    isStarred: Boolean = false,
     onCopy: () -> Unit = {},
     onForward: () -> Unit = {},
+    onPin: () -> Unit = {},
+    onStar: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -318,6 +342,18 @@ fun ActionOnlyCard(
                     onClick = onForward
                 )
             }
+
+            TapbackAction(
+                icon = if (isPinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
+                label = if (isPinned) "Unpin" else "Pin",
+                onClick = onPin
+            )
+
+            TapbackAction(
+                icon = if (isStarred) Icons.Filled.Star else Icons.Outlined.StarBorder,
+                label = if (isStarred) "Unstar" else "Star",
+                onClick = onStar
+            )
         }
     }
 }

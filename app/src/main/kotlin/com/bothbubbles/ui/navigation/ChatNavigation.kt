@@ -244,6 +244,24 @@ fun NavGraphBuilder.chatNavigation(navController: NavHostController) {
             },
             onLife360MapClick = { participantAddress ->
                 navController.navigate(Screen.Life360Map(participantAddress))
+            },
+            onStarredMessagesClick = {
+                navController.navigate(Screen.StarredMessages(route.chatGuid))
+            }
+        )
+    }
+
+    // Starred messages
+    composable<Screen.StarredMessages> { backStackEntry ->
+        val route: Screen.StarredMessages = backStackEntry.toRoute()
+        com.bothbubbles.ui.chat.details.StarredMessagesScreen(
+            chatGuid = route.chatGuid,
+            onNavigateBack = { navController.popBackStack() },
+            onMessageClick = { messageGuid ->
+                // Navigate to chat and scroll to the message
+                navController.navigate(Screen.Chat(route.chatGuid, targetMessageGuid = messageGuid)) {
+                    popUpTo(Screen.ChatDetails(route.chatGuid)) { inclusive = true }
+                }
             }
         )
     }

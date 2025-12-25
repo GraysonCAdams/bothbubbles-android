@@ -854,6 +854,36 @@ class ChatViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Toggle the pinned status of a message.
+     * Room flow will automatically update UI when database changes.
+     */
+    fun toggleMessagePinned(messageGuid: String) {
+        viewModelScope.launch {
+            val result = operations.toggleMessagePinned(messageGuid)
+            result.onSuccess { isPinned ->
+                Timber.d("toggleMessagePinned: $messageGuid is now ${if (isPinned) "pinned" else "unpinned"}")
+            }.onFailure { error ->
+                Timber.e(error, "toggleMessagePinned: failed for $messageGuid")
+            }
+        }
+    }
+
+    /**
+     * Toggle the starred status of a message.
+     * Room flow will automatically update UI when database changes.
+     */
+    fun toggleMessageStarred(messageGuid: String) {
+        viewModelScope.launch {
+            val result = operations.toggleMessageStarred(messageGuid)
+            result.onSuccess { isStarred ->
+                Timber.d("toggleMessageStarred: $messageGuid is now ${if (isStarred) "starred" else "unstarred"}")
+            }.onFailure { error ->
+                Timber.e(error, "toggleMessageStarred: failed for $messageGuid")
+            }
+        }
+    }
+
     // ============================================================================
     // SEARCH
     // Phase 4: ViewModel coordinates search by providing messages from messageList

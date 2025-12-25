@@ -441,6 +441,7 @@ internal fun SimpleBubbleContent(
                                 name = message.senderName ?: "?",
                                 avatarPath = message.senderAvatarPath,
                                 size = avatarSize,
+                                hasContactInfo = message.senderHasContactInfo,
                                 modifier = Modifier
                                     .padding(end = 8.dp)
                                     .then(

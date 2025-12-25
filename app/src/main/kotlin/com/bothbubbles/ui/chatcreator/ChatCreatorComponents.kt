@@ -132,7 +132,8 @@ fun ContactTile(
                 Avatar(
                     name = contact.displayName,
                     avatarPath = contact.avatarPath,
-                    size = 48.dp
+                    size = 48.dp,
+                    hasContactInfo = true // These are saved contacts
                 )
 
                 // Selection checkmark indicator
@@ -583,7 +584,8 @@ fun PopularChatListItem(
                 Avatar(
                     name = popularChat.displayName,
                     avatarPath = popularChat.avatarPath,
-                    size = 48.dp
+                    size = 48.dp,
+                    hasContactInfo = popularChat.avatarPath != null
                 )
 
                 // Badge for group indicator

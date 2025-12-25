@@ -6,18 +6,11 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
-import android.graphics.PorterDuff
-import android.graphics.PorterDuffXfermode
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import androidx.core.content.FileProvider
 import com.bothbubbles.data.local.db.dao.AttachmentDao
-import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.MessageDao
-import com.bothbubbles.data.local.db.dao.UnifiedChatDao
-import com.bothbubbles.data.local.db.entity.displayName
-import com.bothbubbles.data.local.db.entity.rawDisplayName
-import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.di.IoDispatcher
 import com.bothbubbles.services.ActiveConversationManager
@@ -48,10 +41,8 @@ class NotificationMediaUpdater @Inject constructor(
     private val attachmentDownloadQueue: AttachmentDownloadQueue,
     private val attachmentDao: AttachmentDao,
     private val messageDao: MessageDao,
-    private val chatDao: ChatDao,
-    private val unifiedChatDao: UnifiedChatDao,
-    private val chatRepository: ChatRepository,
     private val notificationService: NotificationService,
+    private val notificationParamsBuilder: NotificationParamsBuilder,
     private val activeConversationManager: ActiveConversationManager,
     @ApplicationScope private val applicationScope: CoroutineScope,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
@@ -151,13 +142,6 @@ class NotificationMediaUpdater @Inject constructor(
                 return
             }
 
-            // Look up chat
-            val chat = chatDao.getChatByGuid(chatGuid)
-            if (chat == null) {
-                Timber.w("$TAG: Chat not found: $chatGuid")
-                return
-            }
-
             // Generate content:// URI for the file
             val file = File(localPath)
             if (!file.exists()) {
@@ -198,49 +182,27 @@ class NotificationMediaUpdater @Inject constructor(
                 }
             }
 
-            // Get unified chat for avatar path
-            val unifiedChat = chat.unifiedChatId?.let { unifiedChatDao.getById(it) }
-
-            // Get participants and chat info
-            val participants = chatRepository.getParticipantsForChat(chatGuid)
-            val participantNames = participants.map { it.rawDisplayName }
-            val participantAvatarPaths = participants.map { it.cachedAvatarPath }
-
-            // Resolve chat title
-            val chatTitle = chatRepository.resolveChatTitle(chat, participants)
-
-            // Get sender info
-            val senderAddress = message.senderAddress ?: ""
-            val senderParticipant = participants.find { it.address == senderAddress }
-            val senderName = senderParticipant?.displayName
-            val senderAvatarUri = senderParticipant?.cachedAvatarPath
-
             // Get message text (or generate preview text)
             val messageText = message.text?.takeIf { it.isNotBlank() }
                 ?: getAttachmentPreviewText(mimeType)
 
             Timber.d("$TAG: Updating notification for chat $chatGuid with attachment: $attachmentUri")
 
-            // Update the notification with inline media
-            notificationService.showMessageNotification(
-                MessageNotificationParams(
-                    chatGuid = chatGuid,
-                    chatTitle = chatTitle,
-                    messageText = messageText,
-                    messageGuid = message.guid,
-                    senderName = senderName,
-                    senderAddress = senderAddress,
-                    isGroup = chat.isGroup,
-                    avatarUri = senderAvatarUri,
-                    participantNames = participantNames,
-                    participantAvatarPaths = participantAvatarPaths,
-                    // Priority: UnifiedChatEntity avatar > ChatEntity serverGroupPhotoPath (fallback for group chats)
-                    groupAvatarPath = unifiedChat?.effectiveAvatarPath ?: chat.serverGroupPhotoPath,
-                    subject = message.subject,
-                    attachmentUri = attachmentUri,
-                    attachmentMimeType = notificationMimeType
-                )
+            // Build notification params using shared builder (ensures consistent contact caching)
+            val params = notificationParamsBuilder.buildParams(
+                messageGuid = message.guid,
+                chatGuid = chatGuid,
+                messageText = messageText,
+                subject = message.subject,
+                senderAddress = message.senderAddress,
+                attachmentUri = attachmentUri,
+                attachmentMimeType = notificationMimeType,
+                fetchLinkPreview = false // Already have attachment, no need for link preview
             )
+
+            if (params != null) {
+                notificationService.showMessageNotification(params)
+            }
         } catch (e: Exception) {
             Timber.e(e, "$TAG: Error updating notification for attachment: $attachmentGuid")
         }

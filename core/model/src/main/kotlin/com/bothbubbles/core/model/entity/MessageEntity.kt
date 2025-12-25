@@ -30,7 +30,11 @@ import androidx.room.PrimaryKey
         Index(value = ["unified_chat_id", "date_created", "date_deleted", "guid"]),
         Index(value = ["unified_chat_id", "is_reaction", "date_created", "guid"]),
         // Index for querying link embed messages
-        Index(value = ["is_link_embed"])
+        Index(value = ["is_link_embed"]),
+        // Index for efficient pinned message queries per chat
+        Index(value = ["chat_guid", "is_pinned"]),
+        // Index for efficient starred (bookmarked) message queries per chat
+        Index(value = ["chat_guid", "is_bookmarked"])
     ],
     foreignKeys = [
         ForeignKey(
@@ -144,6 +148,13 @@ data class MessageEntity(
 
     @ColumnInfo(name = "is_bookmarked")
     val isBookmarked: Boolean = false,
+
+    /**
+     * Whether this message is pinned to the top of the conversation.
+     * Pinned messages appear in a collapsible section at the top of the chat.
+     */
+    @ColumnInfo(name = "is_pinned", defaultValue = "0")
+    val isPinned: Boolean = false,
 
     @ColumnInfo(name = "has_dd_results")
     val hasDdResults: Boolean = false,

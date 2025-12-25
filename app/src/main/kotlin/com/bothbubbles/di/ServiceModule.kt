@@ -22,6 +22,8 @@ import com.bothbubbles.services.messaging.MessageSendingService
 import com.bothbubbles.services.notifications.NotificationService
 import com.bothbubbles.services.notifications.Notifier
 import com.bothbubbles.services.socialmedia.SocialMediaCacher
+import com.bothbubbles.services.avatar.AvatarResolver
+import com.bothbubbles.services.avatar.AvatarResolverImpl
 import com.bothbubbles.services.socialmedia.SocialMediaCacheManager
 import com.bothbubbles.services.socialmedia.SocialMediaDownloader
 import com.bothbubbles.services.socialmedia.SocialMediaDownloadService
@@ -204,4 +206,14 @@ abstract class ServiceModule {
     abstract fun bindSocialMediaCacher(
         socialMediaCacheManager: SocialMediaCacheManager
     ): SocialMediaCacher
+
+    /**
+     * Binds [AvatarResolverImpl] to the [AvatarResolver] interface.
+     * Use AvatarResolver for consistent avatar resolution across the app.
+     */
+    @Binds
+    @Singleton
+    abstract fun bindAvatarResolver(
+        avatarResolverImpl: AvatarResolverImpl
+    ): AvatarResolver
 }

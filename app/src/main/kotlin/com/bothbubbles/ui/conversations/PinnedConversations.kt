@@ -603,7 +603,8 @@ internal fun PinnedDragOverlay(
                     Avatar(
                         name = conversation.displayName,
                         avatarPath = conversation.chatAvatarPath,
-                        size = 56.dp
+                        size = 56.dp,
+                        hasContactInfo = !conversation.hasInferredName
                     )
                 } else if (conversation.isGroup) {
                     GroupAvatar(
@@ -615,7 +616,8 @@ internal fun PinnedDragOverlay(
                     Avatar(
                         name = conversation.displayName,
                         avatarPath = conversation.avatarPath,
-                        size = 56.dp
+                        size = 56.dp,
+                        hasContactInfo = !conversation.hasInferredName
                     )
                 }
 
@@ -719,7 +721,8 @@ internal fun PinnedConversationItem(
                             Avatar(
                                 name = conversation.displayName,
                                 avatarPath = conversation.chatAvatarPath,
-                                size = 72.dp
+                                size = 72.dp,
+                                hasContactInfo = !conversation.hasInferredName
                             )
                         } else if (conversation.isGroup) {
                             GroupAvatar(
@@ -731,7 +734,8 @@ internal fun PinnedConversationItem(
                             Avatar(
                                 name = conversation.displayName,
                                 avatarPath = conversation.avatarPath,
-                                size = 72.dp
+                                size = 72.dp,
+                                hasContactInfo = !conversation.hasInferredName
                             )
                         }
                     }

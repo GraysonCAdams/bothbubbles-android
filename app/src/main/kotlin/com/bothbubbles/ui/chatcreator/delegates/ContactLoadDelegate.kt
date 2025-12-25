@@ -98,9 +98,10 @@ class ContactLoadDelegate @Inject constructor(
             if (activityService != null) {
                 handleServiceMap[normalized] = activityService
             }
-            // Priority 2: For handles with no active chat, default to SMS (phone) or iMessage (email)
+            // Priority 2: For handles with no active chat, use the service from the handle
+            // The handle's service field comes from the server and indicates iMessage capability
             else if (!handleServiceMap.containsKey(normalized)) {
-                handleServiceMap[normalized] = if (handle.address.contains("@")) "iMessage" else "SMS"
+                handleServiceMap[normalized] = handle.service
             }
         }
 

@@ -178,7 +178,8 @@ internal fun GoogleStyleConversationTile(
                                 Avatar(
                                     name = conversation.displayName,
                                     avatarPath = conversation.chatAvatarPath,
-                                    size = 56.dp
+                                    size = 56.dp,
+                                    hasContactInfo = !conversation.hasInferredName
                                 )
                             } else if (conversation.isGroup) {
                                 GroupAvatar(
@@ -190,7 +191,8 @@ internal fun GoogleStyleConversationTile(
                                 Avatar(
                                     name = conversation.rawDisplayName,
                                     avatarPath = conversation.avatarPath,
-                                    size = 56.dp
+                                    size = 56.dp,
+                                    hasContactInfo = !conversation.hasInferredName
                                 )
                             }
 

@@ -53,6 +53,15 @@ fun AvatarWithStatus(
 
 /**
  * Conversation avatar that handles both single and group chats
+ *
+ * @param displayName Display name for the conversation
+ * @param isGroup Whether this is a group chat
+ * @param participantNames List of participant names for group collage
+ * @param avatarPath Custom avatar path (for 1:1 or custom group photo)
+ * @param participantAvatars Avatar paths for each participant (corresponding to participantNames)
+ * @param hasContactInfo Whether the primary participant has saved contact info (prevents false business detection)
+ * @param modifier Modifier for the avatar
+ * @param size Size of the avatar
  */
 @Composable
 fun ConversationAvatar(
@@ -61,6 +70,7 @@ fun ConversationAvatar(
     participantNames: List<String> = emptyList(),
     avatarPath: String? = null,
     participantAvatars: List<String?> = emptyList(),
+    hasContactInfo: Boolean = false,
     modifier: Modifier = Modifier,
     size: Dp = 56.dp
 ) {
@@ -76,7 +86,8 @@ fun ConversationAvatar(
             name = displayName,
             avatarPath = avatarPath,
             size = size,
-            modifier = modifier
+            modifier = modifier,
+            hasContactInfo = hasContactInfo
         )
     }
 }

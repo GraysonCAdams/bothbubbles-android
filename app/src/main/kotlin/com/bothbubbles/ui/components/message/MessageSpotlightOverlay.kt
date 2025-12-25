@@ -96,12 +96,16 @@ fun MessageSpotlightOverlay(
     canReply: Boolean = false,
     canCopy: Boolean = true,
     canForward: Boolean = true,
+    isPinned: Boolean = false,
+    isStarred: Boolean = false,
     showReactions: Boolean = true,
     onDismiss: () -> Unit,
     onReactionSelected: (Tapback) -> Unit = {},
     onReply: () -> Unit = {},
     onCopy: () -> Unit = {},
     onForward: () -> Unit = {},
+    onPin: () -> Unit = {},
+    onStar: () -> Unit = {},
     messageContent: @Composable BoxScope.() -> Unit
 ) {
     // Decouple visibility from presence for animation
@@ -288,6 +292,8 @@ fun MessageSpotlightOverlay(
                     canReply = canReply,
                     canCopy = canCopy,
                     canForward = canForward,
+                    isPinned = isPinned,
+                    isStarred = isStarred,
                     onReactionSelected = { tapback ->
                         scope.launch {
                             onReactionSelected(tapback)
@@ -311,12 +317,26 @@ fun MessageSpotlightOverlay(
                             onForward()
                             closeWithAnimation()
                         }
+                    },
+                    onPin = {
+                        scope.launch {
+                            onPin()
+                            closeWithAnimation()
+                        }
+                    },
+                    onStar = {
+                        scope.launch {
+                            onStar()
+                            closeWithAnimation()
+                        }
                     }
                 )
             } else {
                 ActionOnlyCard(
                     canCopy = canCopy,
                     canForward = canForward,
+                    isPinned = isPinned,
+                    isStarred = isStarred,
                     onCopy = {
                         scope.launch {
                             onCopy()
@@ -326,6 +346,18 @@ fun MessageSpotlightOverlay(
                     onForward = {
                         scope.launch {
                             onForward()
+                            closeWithAnimation()
+                        }
+                    },
+                    onPin = {
+                        scope.launch {
+                            onPin()
+                            closeWithAnimation()
+                        }
+                    },
+                    onStar = {
+                        scope.launch {
+                            onStar()
                             closeWithAnimation()
                         }
                     }

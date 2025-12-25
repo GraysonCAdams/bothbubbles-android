@@ -70,11 +70,19 @@ fun TapbackOverlay(
     canReply: Boolean = false,
     canCopy: Boolean = true,
     canForward: Boolean = true,
+    canAddToTasks: Boolean = true,
+    canPin: Boolean = true,
+    isPinned: Boolean = false,
+    canStar: Boolean = true,
+    isStarred: Boolean = false,
     onDismiss: () -> Unit,
     onReactionSelected: (Tapback) -> Unit,
     onReply: () -> Unit = {},
     onCopy: () -> Unit = {},
     onForward: () -> Unit = {},
+    onAddToTasks: () -> Unit = {},
+    onPin: () -> Unit = {},
+    onStar: () -> Unit = {},
     onEmojiPickerClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     messageContent: @Composable BoxScope.() -> Unit = {}
@@ -132,8 +140,10 @@ fun TapbackOverlay(
     }
 
     // Reaction pill dimensions for clamping
-    val reactionPillWidth = with(density) { 280.dp.toPx() }
-    val actionMenuWidth = with(density) { 180.dp.toPx() }
+    // ReactionPill: 6 tapbacks + emoji picker = 7 items * 40.dp + 12.dp padding = 292.dp
+    val reactionPillWidth = with(density) { 292.dp.toPx() }
+    // Action menu now matches reaction pill width (horizontal pill style)
+    val actionMenuWidth = reactionPillWidth
 
     Box(
         modifier = modifier.fillMaxSize()
@@ -245,13 +255,17 @@ fun TapbackOverlay(
                     alpha = overlayAlpha.value
                 }
                 .padding(horizontal = 8.dp)
-                .width(180.dp)
         ) {
             MessageActionMenu(
                 visible = isPresent,
                 canReply = canReply,
                 canCopy = canCopy,
                 canForward = canForward,
+                canAddToTasks = canAddToTasks,
+                canPin = canPin,
+                isPinned = isPinned,
+                canStar = canStar,
+                isStarred = isStarred,
                 onReply = {
                     scope.launch {
                         onReply()
@@ -267,6 +281,24 @@ fun TapbackOverlay(
                 onForward = {
                     scope.launch {
                         onForward()
+                        closeWithAnimation()
+                    }
+                },
+                onAddToTasks = {
+                    scope.launch {
+                        onAddToTasks()
+                        closeWithAnimation()
+                    }
+                },
+                onPin = {
+                    scope.launch {
+                        onPin()
+                        closeWithAnimation()
+                    }
+                },
+                onStar = {
+                    scope.launch {
+                        onStar()
                         closeWithAnimation()
                     }
                 }
@@ -337,9 +369,17 @@ fun ActionOnlyOverlay(
     messageBounds: MessageBoundsInfo?,
     canCopy: Boolean = true,
     canForward: Boolean = true,
+    canAddToTasks: Boolean = true,
+    canPin: Boolean = true,
+    isPinned: Boolean = false,
+    canStar: Boolean = true,
+    isStarred: Boolean = false,
     onDismiss: () -> Unit,
     onCopy: () -> Unit = {},
     onForward: () -> Unit = {},
+    onAddToTasks: () -> Unit = {},
+    onPin: () -> Unit = {},
+    onStar: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     // Decouple visibility from presence
@@ -378,7 +418,8 @@ fun ActionOnlyOverlay(
     val configuration = LocalConfiguration.current
     val screenWidth = with(density) { configuration.screenWidthDp.dp.toPx() }
     val safeMarginPx = with(density) { SafeZoneMargin.toPx() }
-    val actionMenuWidth = with(density) { 180.dp.toPx() }
+    // Action menu now matches reaction pill width (horizontal pill style)
+    val actionMenuWidth = with(density) { 292.dp.toPx() }
 
     Box(
         modifier = modifier.fillMaxSize()
@@ -428,13 +469,17 @@ fun ActionOnlyOverlay(
                     alpha = overlayAlpha.value
                 }
                 .padding(horizontal = 8.dp)
-                .width(180.dp)
         ) {
             MessageActionMenu(
                 visible = isPresent,
                 canReply = false,
                 canCopy = canCopy,
                 canForward = canForward,
+                canAddToTasks = canAddToTasks,
+                canPin = canPin,
+                isPinned = isPinned,
+                canStar = canStar,
+                isStarred = isStarred,
                 onCopy = {
                     scope.launch {
                         onCopy()
@@ -444,6 +489,24 @@ fun ActionOnlyOverlay(
                 onForward = {
                     scope.launch {
                         onForward()
+                        closeWithAnimation()
+                    }
+                },
+                onAddToTasks = {
+                    scope.launch {
+                        onAddToTasks()
+                        closeWithAnimation()
+                    }
+                },
+                onPin = {
+                    scope.launch {
+                        onPin()
+                        closeWithAnimation()
+                    }
+                },
+                onStar = {
+                    scope.launch {
+                        onStar()
                         closeWithAnimation()
                     }
                 }

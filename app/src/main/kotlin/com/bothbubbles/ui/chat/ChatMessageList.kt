@@ -147,7 +147,12 @@ data class MessageListCallbacks(
     val onNavigateSearchDown: () -> Unit,
     val onViewAllSearchResults: () -> Unit,
     val onAvatarClick: ((MessageUiModel) -> Unit)?,
-    val onOpenReelsFeed: (() -> Unit)?
+    val onOpenReelsFeed: (() -> Unit)?,
+    val onTogglePin: (messageGuid: String) -> Unit,
+    val onToggleStar: (messageGuid: String) -> Unit,
+    // Chat context for reminder deep links
+    val chatGuid: String,
+    val chatTitle: String
 )
 
 /**
@@ -725,7 +730,11 @@ fun ChatMessageList(
                             onToggleReaction = callbacks.onToggleReaction,
                             onSetReplyTo = callbacks.onSetReplyTo,
                             onForwardRequest = if (isBubbleMode) { _ -> } else callbacks.onForwardRequest,
-                            onEnterSelectionMode = if (isBubbleMode) { _ -> } else chatScreenState::enterMessageSelectionMode
+                            onEnterSelectionMode = if (isBubbleMode) { _ -> } else chatScreenState::enterMessageSelectionMode,
+                            onTogglePin = if (isBubbleMode) { _ -> } else callbacks.onTogglePin,
+                            onToggleStar = if (isBubbleMode) { _ -> } else callbacks.onToggleStar,
+                            chatGuid = callbacks.chatGuid,
+                            senderName = callbacks.chatTitle
                         )
                     )
                 }

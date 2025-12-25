@@ -90,7 +90,7 @@ import com.bothbubbles.data.local.db.dao.CalendarEventOccurrenceDao
         SocialMediaLinkEntity::class,
         CalendarEventOccurrenceEntity::class
     ],
-    version = 63,
+    version = 64,
     exportSchema = true
 )
 abstract class BothBubblesDatabase : RoomDatabase() {

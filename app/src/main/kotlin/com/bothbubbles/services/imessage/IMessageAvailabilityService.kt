@@ -4,8 +4,6 @@ import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.IMessageCacheDao
 import com.bothbubbles.data.local.db.entity.CheckResult
 import com.bothbubbles.data.local.db.entity.IMessageAvailabilityCacheEntity
-import com.bothbubbles.data.local.prefs.SettingsDataStore
-import com.bothbubbles.core.network.api.BothBubblesApi
 import com.bothbubbles.core.data.ConnectionState
 import com.bothbubbles.services.socket.SocketService
 import com.bothbubbles.di.ApplicationScope
@@ -17,23 +15,13 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
-import java.net.URLEncoder
 import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
-import javax.net.ssl.HttpsURLConnection
-import javax.net.ssl.SSLContext
-import javax.net.ssl.X509TrustManager
-import java.security.cert.X509Certificate
 
 /**
  * Service for checking and caching iMessage availability for contacts.
@@ -50,10 +38,9 @@ import java.security.cert.X509Certificate
  */
 @Singleton
 class IMessageAvailabilityService @Inject constructor(
-    private val api: BothBubblesApi,
+    private val serverChecker: ServerAvailabilityChecker,
     private val cacheDao: IMessageCacheDao,
     private val socketService: SocketService,
-    private val settingsDataStore: SettingsDataStore,
     @ApplicationScope private val applicationScope: CoroutineScope,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
@@ -62,9 +49,6 @@ class IMessageAvailabilityService @Inject constructor(
 
     // Mutex for cache operations
     private val cacheMutex = Mutex()
-
-    // Track pending checks to deduplicate concurrent requests
-    private val pendingChecks = ConcurrentHashMap<String, kotlinx.coroutines.Deferred<Result<Boolean>>>()
 
     // Observable availability state per address (for UI updates)
     private val _availabilityStates = MutableStateFlow<Map<String, Boolean?>>(emptyMap())
@@ -115,9 +99,7 @@ class IMessageAvailabilityService @Inject constructor(
         }
 
         // Check if server is connected
-        val connectionState = socketService.connectionState.value
-        Timber.d("DEBUG: connectionState=$connectionState")
-        if (connectionState != ConnectionState.CONNECTED) {
+        if (!serverChecker.isServerConnected()) {
             Timber.d("Server not connected, marking as UNREACHABLE")
             cacheResult(normalizedAddress, CheckResult.UNREACHABLE, null)
             updateObservableState(normalizedAddress, null)
@@ -194,96 +176,43 @@ class IMessageAvailabilityService @Inject constructor(
 
     /**
      * Perform the actual iMessage availability check via API.
-     * Uses HttpURLConnection instead of OkHttp to bypass potential OkHttp issues.
+     * Uses ServerAvailabilityChecker (Retrofit) for consistent networking.
      */
     private suspend fun performCheck(normalizedAddress: String): Result<Boolean> {
         return withContext(ioDispatcher) {
-            try {
-                Timber.d("DEBUG performCheck: Calling API via HttpURLConnection")
+            Timber.d("performCheck: Calling API via ServerAvailabilityChecker")
 
-                // Disable HTTP keep-alive to prevent stale connection reuse
-                System.setProperty("http.keepAlive", "false")
+            val checkResult = serverChecker.check(normalizedAddress)
 
-                val serverAddress = settingsDataStore.serverAddress.first()
-                val authKey = settingsDataStore.guidAuthKey.first()
-
-                val encodedAddress = URLEncoder.encode(normalizedAddress, "UTF-8")
-                val encodedAuth = URLEncoder.encode(authKey, "UTF-8")
-                // Add cache buster to prevent HTTP caching/connection reuse
-                val cacheBuster = System.currentTimeMillis()
-                val urlString = "$serverAddress/api/v1/handle/availability/imessage?address=$encodedAddress&guid=$encodedAuth&_=$cacheBuster"
-
-                Timber.d("DEBUG performCheck: Calling endpoint /api/v1/handle/availability/imessage")
-
-                val url = URL(urlString)
-                val connection = url.openConnection() as HttpsURLConnection
-
-                try {
-                    // Trust all certificates (for self-signed BlueBubbles servers)
-                    val trustAllCerts = arrayOf<javax.net.ssl.TrustManager>(object : X509TrustManager {
-                        override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
-                        override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
-                        override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
-                    })
-                    val sslContext = SSLContext.getInstance("TLS")
-                    sslContext.init(null, trustAllCerts, java.security.SecureRandom())
-                    connection.sslSocketFactory = sslContext.socketFactory
-                    connection.hostnameVerifier = javax.net.ssl.HostnameVerifier { _, _ -> true }
-
-                    connection.requestMethod = "GET"
-                    connection.connectTimeout = 15000
-                    connection.readTimeout = 15000
-                    connection.useCaches = false // Disable URL caching
-                    connection.setRequestProperty("Accept", "application/json")
-                    connection.setRequestProperty("Connection", "close")
-                    connection.setRequestProperty("Cache-Control", "no-cache, no-store")
-
-                    val responseCode = connection.responseCode
-                    Timber.d("DEBUG performCheck: responseCode=$responseCode")
-
-                    if (responseCode == HttpURLConnection.HTTP_OK) {
-                        val responseBody = connection.inputStream.bufferedReader().use { it.readText() }
-                        Timber.d("DEBUG performCheck: responseBody=$responseBody")
-
-                        val json = JSONObject(responseBody)
-                        val data = json.optJSONObject("data")
-                        val available = data?.optBoolean("available", false) == true
-
-                        val result = if (available) CheckResult.AVAILABLE else CheckResult.NOT_AVAILABLE
-                        Timber.d("DEBUG performCheck: available=$available, caching as $result")
-                        cacheResult(normalizedAddress, result, available)
-                        updateObservableState(normalizedAddress, available)
-                        Timber.d("iMessage availability: $available")
-                        Result.success(available)
-                    } else {
-                        val errorBody = try { connection.errorStream?.bufferedReader()?.use { it.readText() } } catch (e: Exception) { null }
-                        Timber.w("DEBUG performCheck: API failed with code $responseCode, errorBody=$errorBody")
-                        cacheResult(normalizedAddress, CheckResult.ERROR, null)
-                        updateObservableState(normalizedAddress, null)
-                        Result.failure(Exception("API error: $responseCode"))
-                    }
-                } finally {
-                    connection.disconnect() // Force close to prevent stale connection reuse
+            when (checkResult) {
+                is ServerAvailabilityChecker.CheckResult.Available -> {
+                    cacheResult(normalizedAddress, CheckResult.AVAILABLE, true)
+                    updateObservableState(normalizedAddress, true)
+                    Timber.d("iMessage availability: true")
+                    Result.success(true)
                 }
-            } catch (e: Exception) {
-                val isTimeout = e is java.net.SocketTimeoutException
-                Timber.w(e, "DEBUG performCheck: Exception occurred: ${e.message}, isTimeout=$isTimeout")
-
-                if (isTimeout) {
+                is ServerAvailabilityChecker.CheckResult.NotAvailable -> {
+                    cacheResult(normalizedAddress, CheckResult.NOT_AVAILABLE, false)
+                    updateObservableState(normalizedAddress, false)
+                    Timber.d("iMessage availability: false")
+                    Result.success(false)
+                }
+                is ServerAvailabilityChecker.CheckResult.Timeout -> {
                     // Timeout = server instability, don't cache - will retry next time
-                    Timber.d("DEBUG performCheck: Timeout detected, NOT caching (server instability)")
+                    Timber.d("Timeout detected, NOT caching (server instability)")
                     updateObservableState(normalizedAddress, null)
-                } else {
-                    // Other errors - cache as ERROR or UNREACHABLE
-                    val result = if (socketService.connectionState.value != ConnectionState.CONNECTED) {
-                        CheckResult.UNREACHABLE
-                    } else {
-                        CheckResult.ERROR
-                    }
-                    cacheResult(normalizedAddress, result, null)
-                    updateObservableState(normalizedAddress, null)
+                    Result.failure(Exception("Request timed out"))
                 }
-                Result.failure(e)
+                is ServerAvailabilityChecker.CheckResult.Error -> {
+                    cacheResult(normalizedAddress, CheckResult.ERROR, null)
+                    updateObservableState(normalizedAddress, null)
+                    Result.failure(checkResult.cause)
+                }
+                is ServerAvailabilityChecker.CheckResult.ServerDisconnected -> {
+                    cacheResult(normalizedAddress, CheckResult.UNREACHABLE, null)
+                    updateObservableState(normalizedAddress, null)
+                    Result.failure(Exception("Server disconnected"))
+                }
             }
         }
     }

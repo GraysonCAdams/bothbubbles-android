@@ -73,10 +73,16 @@ fun FocusMenuCard(
     canReply: Boolean,
     canCopy: Boolean,
     canForward: Boolean,
+    canAddToTasks: Boolean = true,
+    isPinned: Boolean = false,
+    isStarred: Boolean = false,
     onReactionSelected: (Tapback) -> Unit,
     onReply: () -> Unit,
     onCopy: () -> Unit,
     onForward: () -> Unit,
+    onAddToTasks: () -> Unit = {},
+    onPin: () -> Unit = {},
+    onStar: () -> Unit = {},
     onSelect: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -202,8 +208,31 @@ fun FocusMenuCard(
                     needsSeparator = true
                 }
 
-                // Always show Select action to enter multi-select mode
+                if (canAddToTasks) {
+                    if (needsSeparator) ActionSeparator()
+                    ActionTextButton(
+                        label = "Remind",
+                        onClick = onAddToTasks
+                    )
+                    needsSeparator = true
+                }
+
+                // Pin action
                 if (needsSeparator) ActionSeparator()
+                ActionTextButton(
+                    label = if (isPinned) "Unpin" else "Pin",
+                    onClick = onPin
+                )
+
+                // Star action
+                ActionSeparator()
+                ActionTextButton(
+                    label = if (isStarred) "Unstar" else "Star",
+                    onClick = onStar
+                )
+
+                // Always show Select action to enter multi-select mode
+                ActionSeparator()
                 ActionTextButton(
                     label = "Select",
                     onClick = onSelect

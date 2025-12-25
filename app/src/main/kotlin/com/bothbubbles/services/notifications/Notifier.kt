@@ -2,7 +2,7 @@ package com.bothbubbles.services.notifications
 
 /**
  * Parameters for showing a message notification.
- * Consolidates the 15 parameters into a single data class for better API design.
+ * Consolidates the parameters into a single data class for better API design.
  *
  * @param chatGuid Unique identifier for the chat
  * @param chatTitle Display name of the conversation
@@ -12,10 +12,12 @@ package com.bothbubbles.services.notifications
  * @param senderAddress The sender's address (phone/email) used for bubble filtering
  * @param isGroup Whether this is a group conversation
  * @param avatarUri Optional URI to the sender's contact photo
+ * @param senderHasContactInfo Whether the sender has saved contact info (prevents false business detection)
  * @param linkPreviewTitle Optional link preview title
  * @param linkPreviewDomain Optional link preview domain
  * @param participantNames List of participant names for group chats (used for group avatar collage)
  * @param participantAvatarPaths List of avatar paths for group participants (corresponding to participantNames)
+ * @param participantHasContactInfo List of booleans indicating if each participant has contact info
  * @param groupAvatarPath Optional path to group avatar (customAvatarPath or serverGroupPhotoPath). Takes priority over participant collage.
  * @param subject Optional message subject (for iMessage). When present, shows ONLY the subject.
  * @param attachmentUri Optional content:// URI to an attachment image/video for inline preview
@@ -30,10 +32,12 @@ data class MessageNotificationParams(
     val senderAddress: String? = null,
     val isGroup: Boolean = false,
     val avatarUri: String? = null,
+    val senderHasContactInfo: Boolean = false,
     val linkPreviewTitle: String? = null,
     val linkPreviewDomain: String? = null,
     val participantNames: List<String> = emptyList(),
     val participantAvatarPaths: List<String?> = emptyList(),
+    val participantHasContactInfo: List<Boolean> = emptyList(),
     val groupAvatarPath: String? = null,
     val subject: String? = null,
     val attachmentUri: android.net.Uri? = null,

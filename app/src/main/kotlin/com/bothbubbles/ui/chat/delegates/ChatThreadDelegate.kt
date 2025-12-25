@@ -1,9 +1,9 @@
 package com.bothbubbles.ui.chat.delegates
 
-import com.bothbubbles.data.local.db.entity.displayName
 import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.MessageRepository
+import com.bothbubbles.services.contacts.DisplayNameResolver
 import com.bothbubbles.ui.chat.MessageTransformationUtils.normalizeAddress
 import com.bothbubbles.ui.chat.MessageTransformationUtils.toUiModel
 import com.bothbubbles.ui.chat.state.ThreadState
@@ -35,6 +35,7 @@ class ChatThreadDelegate @AssistedInject constructor(
     private val messageRepository: MessageRepository,
     private val chatRepository: ChatRepository,
     private val attachmentRepository: AttachmentRepository,
+    private val displayNameResolver: DisplayNameResolver,
     @Assisted private val scope: CoroutineScope,
     @Assisted private val mergedChatGuids: List<String>
 ) {
@@ -69,11 +70,9 @@ class ChatThreadDelegate @AssistedInject constructor(
             val origin = threadMessages.find { it.guid == originGuid }
             val replies = threadMessages.filter { it.threadOriginatorGuid == originGuid }
 
-            // Get participants for sender name and avatar resolution
+            // Get participants and build lookup maps using centralized resolver
             val participants = chatRepository.getParticipantsForChats(mergedChatGuids)
-            val handleIdToName = participants.associate { it.id to it.displayName }
-            val addressToName = participants.associate { normalizeAddress(it.address) to it.displayName }
-            val addressToAvatarPath = participants.associate { normalizeAddress(it.address) to it.cachedAvatarPath }
+            val lookupMaps = displayNameResolver.buildLookupMaps(participants)
 
             // Batch load attachments for all thread messages
             val messageGuids = threadMessages.map { it.guid }
@@ -106,11 +105,14 @@ class ChatThreadDelegate @AssistedInject constructor(
                 reactionsByMessage[origin.guid].orEmpty().mapNotNull { reaction ->
                     val tapback = Tapback.fromApiName(reaction.associatedMessageType ?: "") ?: return@mapNotNull null
                     val isFromMe = reaction.isFromMe
-                    val senderAddress = reaction.senderAddress?.let { normalizeAddress(it) }
                     val senderName = when {
                         isFromMe -> "You"
-                        senderAddress != null -> addressToName[senderAddress] ?: senderAddress
-                        else -> "Unknown"
+                        else -> displayNameResolver.resolveSenderName(
+                            reaction.senderAddress,
+                            reaction.handleId,
+                            lookupMaps,
+                            DisplayNameResolver.DisplayMode.FULL
+                        ) ?: "Unknown"
                     }
                     ReactionUiModel(
                         tapback = tapback,
@@ -127,17 +129,13 @@ class ChatThreadDelegate @AssistedInject constructor(
                 originMessage = if (excludeOrigin) null else origin?.toUiModel(
                     reactions = reactionsByMessage[origin.guid].orEmpty(),
                     attachments = allAttachments[origin.guid].orEmpty(),
-                    handleIdToName = handleIdToName,
-                    addressToName = addressToName,
-                    addressToAvatarPath = addressToAvatarPath
+                    lookupMaps = lookupMaps
                 ),
                 replies = filteredReplies.map { msg ->
                     msg.toUiModel(
                         reactions = reactionsByMessage[msg.guid].orEmpty(),
                         attachments = allAttachments[msg.guid].orEmpty(),
-                        handleIdToName = handleIdToName,
-                        addressToName = addressToName,
-                        addressToAvatarPath = addressToAvatarPath
+                        lookupMaps = lookupMaps
                     )
                 }.toStable(),
                 reactions = originReactions

@@ -20,6 +20,19 @@ The following READMEs define **mandatory patterns** for each layer. You MUST rea
 
 **RULE**: When modifying code in a layer, you MUST first read that layer's README and follow its patterns exactly.
 
+## BlueBubbles Server Reference
+
+The `references/bluebubbles-server/` directory contains a copy of the BlueBubbles server source code. **Consult this when**:
+- Debugging API response issues (what fields the server returns)
+- Understanding iMessage database schema (entity definitions)
+- Implementing new API endpoints or understanding existing ones
+
+Key files:
+- `packages/server/src/server/databases/imessage/entity/` - iMessage database entities (Chat, Message, Handle)
+- `packages/server/src/server/api/serializers/` - How entities are serialized to JSON responses
+- `packages/server/src/server/api/http/api/v1/routers/` - API route handlers
+- `packages/server/src/server/types.ts` - TypeScript type definitions for API responses
+
 ## Anti-Pattern Documentation (MANDATORY READING)
 
 The `docs/antipatterns/` directory contains **22 detailed anti-pattern reports** from a comprehensive codebase analysis. Before writing ANY code, you MUST consult the relevant anti-pattern documents:

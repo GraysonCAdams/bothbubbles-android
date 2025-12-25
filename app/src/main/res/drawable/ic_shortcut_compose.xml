@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Adaptive icon safe zone: center 66dp of 108dp -->
+    <!-- Pencil/edit icon centered in safe zone -->
+    <path
+        android:fillColor="#1976D2"
+        android:pathData="M71.31,29.69c-0.78,-0.78 -2.05,-0.78 -2.83,0L36.5,61.67V71.5h9.83l31.98,-31.98c0.78,-0.78 0.78,-2.05 0,-2.83L71.31,29.69zM43.37,67.5H40.5v-2.87l24.73,-24.73 2.87,2.87L43.37,67.5zM70.93,39.93l-2.87,-2.87 2.25,-2.25 2.87,2.87L70.93,39.93z"/>
+</vector>

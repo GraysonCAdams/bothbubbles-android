@@ -140,7 +140,8 @@ fun ContactQuickActionsPopup(
                         Avatar(
                             name = contactInfo.displayName,
                             avatarPath = contactInfo.chatAvatarPath,
-                            size = 120.dp
+                            size = 120.dp,
+                            hasContactInfo = contactInfo.hasContact
                         )
                     }
                     // Group chat without custom photo - show participant collage
@@ -158,7 +159,8 @@ fun ContactQuickActionsPopup(
                         Avatar(
                             name = contactInfo.rawDisplayName,
                             avatarPath = contactInfo.avatarPath,
-                            size = 120.dp
+                            size = 120.dp,
+                            hasContactInfo = contactInfo.hasContact
                         )
                     }
                 }

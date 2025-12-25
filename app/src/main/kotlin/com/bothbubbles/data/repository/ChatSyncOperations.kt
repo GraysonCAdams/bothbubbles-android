@@ -197,10 +197,20 @@ class ChatSyncOperations @Inject constructor(
     private fun ChatDto.toEntity(unifiedChatId: String?): ChatEntity {
         // Clean the displayName: strip service suffixes and validate
         // Also reject if displayName equals chatIdentifier (server sending ID as name)
-        val cleanedDisplayName = displayName
-            ?.let { com.bothbubbles.util.PhoneNumberFormatter.stripServiceSuffix(it) }
-            ?.takeIf { it.isValidDisplayName() }
-            ?.takeIf { it != chatIdentifier }  // Reject if server sent chatIdentifier as displayName
+        val rawDisplayName = displayName
+        val afterStrip = rawDisplayName?.let { com.bothbubbles.util.PhoneNumberFormatter.stripServiceSuffix(it) }
+        val afterValidation = afterStrip?.takeIf { it.isValidDisplayName() }
+        val cleanedDisplayName = afterValidation?.takeIf { it != chatIdentifier }
+
+        // Debug logging for group chats to diagnose displayName issues
+        if ((participants?.size ?: 0) > 1) {
+            Timber.tag(TAG).i(
+                "ChatDto.toEntity: guid=${guid.take(40)}, " +
+                "rawDisplayName=$rawDisplayName, afterStrip=$afterStrip, " +
+                "afterValidation=$afterValidation, final=$cleanedDisplayName, " +
+                "chatIdentifier=$chatIdentifier"
+            )
+        }
 
         return ChatEntity(
             guid = guid,

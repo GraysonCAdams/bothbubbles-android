@@ -20,6 +20,7 @@ import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.services.AppLifecycleTracker
 import com.bothbubbles.services.contacts.AndroidContactsService
+import com.bothbubbles.services.contacts.DisplayNameResolver
 import com.bothbubbles.services.notifications.NotificationService
 import com.bothbubbles.util.PhoneNumberFormatter
 import dagger.assisted.Assisted
@@ -52,7 +53,8 @@ class BackgroundSyncWorker @AssistedInject constructor(
     private val settingsDataStore: SettingsDataStore,
     private val notificationService: NotificationService,
     private val appLifecycleTracker: AppLifecycleTracker,
-    private val androidContactsService: AndroidContactsService
+    private val androidContactsService: AndroidContactsService,
+    private val displayNameResolver: DisplayNameResolver
 ) : CoroutineWorker(context, workerParams) {
 
     companion object {
@@ -243,7 +245,7 @@ class BackgroundSyncWorker @AssistedInject constructor(
 
             // For group chats, use first name only
             val displaySenderName = if (isGroup && senderName != null) {
-                extractFirstName(senderName)
+                displayNameResolver.extractFirstName(senderName)
             } else {
                 senderName
             }
@@ -298,20 +300,6 @@ class BackgroundSyncWorker @AssistedInject constructor(
 
         // Fall back to inferred name or formatted address
         return (handle.inferredName ?: PhoneNumberFormatter.format(address)) to null
-    }
-
-    /**
-     * Extract first name from full name for cleaner group chat display.
-     */
-    private fun extractFirstName(fullName: String): String {
-        val words = fullName.trim().split(Regex("\\s+"))
-        for (word in words) {
-            val cleaned = word.filter { it.isLetterOrDigit() }
-            if (cleaned.isNotEmpty() && cleaned.any { it.isLetter() }) {
-                return cleaned
-            }
-        }
-        return words.firstOrNull()?.filter { it.isLetterOrDigit() } ?: fullName
     }
 
     /**

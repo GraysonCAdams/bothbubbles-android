@@ -8,6 +8,7 @@ import androidx.navigation.toRoute
 import com.bothbubbles.data.local.db.dao.MediaWithSender
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.repository.AttachmentRepository
+import com.bothbubbles.services.contacts.DisplayNameResolver
 import com.bothbubbles.ui.navigation.Screen
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,7 +22,8 @@ import javax.inject.Inject
 @HiltViewModel
 class MediaViewerViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
-    private val attachmentRepository: AttachmentRepository
+    private val attachmentRepository: AttachmentRepository,
+    private val displayNameResolver: DisplayNameResolver
 ) : ViewModel() {
 
     private val route: Screen.MediaViewer = savedStateHandle.toRoute()
@@ -64,7 +66,8 @@ class MediaViewerViewModel @Inject constructor(
                     isFromMe = false,
                     senderAddress = null,
                     dateCreated = System.currentTimeMillis(),
-                    displayName = null,
+                    cachedDisplayName = null,
+                    inferredName = null,
                     avatarPath = null,
                     formattedAddress = null
                 )
@@ -93,7 +96,7 @@ class MediaViewerViewModel @Inject constructor(
                         currentIndex = initialIndex,
                         attachment = currentMedia.attachment,
                         title = currentMedia.attachment.transferName ?: "Media",
-                        senderName = if (currentMedia.isFromMe) "You" else currentMedia.displayName ?: currentMedia.formattedAddress ?: currentMedia.senderAddress,
+                        senderName = if (currentMedia.isFromMe) "You" else resolveSenderName(currentMedia),
                         senderAvatarPath = if (currentMedia.isFromMe) null else currentMedia.avatarPath,
                         senderAddress = if (currentMedia.isFromMe) null else (currentMedia.formattedAddress ?: currentMedia.senderAddress),
                         messageDateMillis = currentMedia.dateCreated,
@@ -117,7 +120,7 @@ class MediaViewerViewModel @Inject constructor(
                 currentIndex = index,
                 attachment = media.attachment,
                 title = media.attachment.transferName ?: "Media",
-                senderName = if (media.isFromMe) "You" else media.displayName ?: media.formattedAddress ?: media.senderAddress,
+                senderName = if (media.isFromMe) "You" else resolveSenderName(media),
                 senderAvatarPath = if (media.isFromMe) null else media.avatarPath,
                 senderAddress = if (media.isFromMe) null else (media.formattedAddress ?: media.senderAddress),
                 messageDateMillis = media.dateCreated,
@@ -208,6 +211,19 @@ class MediaViewerViewModel @Inject constructor(
 
     fun clearError() {
         _uiState.update { it.copy(error = null) }
+    }
+
+    /**
+     * Resolve sender name using centralized DisplayNameResolver.
+     * Ensures consistent name display with "Maybe:" prefix for inferred names.
+     */
+    private fun resolveSenderName(media: MediaWithSender): String {
+        return displayNameResolver.resolveFromRawValues(
+            cachedDisplayName = media.cachedDisplayName,
+            inferredName = media.inferredName,
+            formattedAddress = media.formattedAddress,
+            senderAddress = media.senderAddress
+        )
     }
 }
 

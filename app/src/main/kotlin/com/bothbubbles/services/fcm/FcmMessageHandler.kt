@@ -2,19 +2,15 @@ package com.bothbubbles.services.fcm
 
 import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.ChatDao
-import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.UnifiedChatDao
-import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.MessageRepository
-import com.bothbubbles.data.local.db.entity.displayName
-import com.bothbubbles.data.local.db.entity.rawDisplayName
 import com.bothbubbles.services.ActiveConversationManager
-import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.di.IoDispatcher
 import com.bothbubbles.services.developer.DeveloperEventLog
 import com.bothbubbles.services.media.AttachmentDownloadQueue
 import com.bothbubbles.services.messaging.IncomingMessageHandler
+import com.bothbubbles.services.notifications.NotificationParamsBuilder
 import com.bothbubbles.services.notifications.NotificationService
 import com.bothbubbles.services.socket.SocketService
 import com.bothbubbles.ui.effects.MessageEffect
@@ -48,12 +44,10 @@ import javax.inject.Singleton
 class FcmMessageHandler @Inject constructor(
     private val socketService: SocketService,
     private val notificationService: NotificationService,
+    private val notificationParamsBuilder: NotificationParamsBuilder,
     private val messageRepository: MessageRepository,
-    private val chatRepository: ChatRepository,
     private val chatDao: ChatDao,
-    private val handleDao: HandleDao,
     private val unifiedChatDao: UnifiedChatDao,
-    private val androidContactsService: AndroidContactsService,
     private val messageDeduplicator: MessageDeduplicator,
     private val activeConversationManager: ActiveConversationManager,
     private val developerEventLog: Lazy<DeveloperEventLog>,
@@ -195,7 +189,7 @@ class FcmMessageHandler @Inject constructor(
             return
         }
 
-        // Get chat info from local database
+        // Get chat info from local database for notification settings check
         val chat = chatDao.getChatByGuid(chatGuid)
         val unifiedChat = chat?.unifiedChatId?.let { unifiedChatDao.getById(it) }
 
@@ -215,104 +209,36 @@ class FcmMessageHandler @Inject constructor(
             return
         }
 
-        // Resolve sender name and avatar - try contact lookup first
-        val (senderName, senderAvatarUri) = resolveSenderNameAndAvatar(senderAddress, null)
-        Timber.d("FCM_DEBUG: Resolved sender - name='$senderName', hasAvatar=${senderAvatarUri != null}")
-
-        val isGroup = chat?.isGroup ?: false
-
-        // Fetch participants for chat title resolution and group avatar collage
-        val participants = chatRepository.getParticipantsForChat(chatGuid)
-        val participantNames = participants.map { it.rawDisplayName }
-        val participantAvatarPaths = participants.map { it.cachedAvatarPath }
-
-        // Use centralized chat title logic (same as conversation list)
-        val chatTitle = if (chat != null) {
-            chatRepository.resolveChatTitle(chat, participants)
-        } else {
-            // Fallback when chat not yet in database
-            senderName ?: PhoneNumberFormatter.format(senderAddress ?: "")
-        }
-
         // Check for invisible ink effect (expressiveSendStyleId and hasAttachments already extracted above)
         val isInvisibleInk = MessageEffect.fromStyleId(expressiveSendStyleId) == MessageEffect.Bubble.InvisibleInk
         val notificationText = when {
             isInvisibleInk && hasAttachments -> "Image sent with Invisible Ink"
             isInvisibleInk -> "Message sent with Invisible Ink"
             messageText.isNotBlank() -> messageText
-            hasAttachments -> "📷 Photo"
+            hasAttachments -> "Photo"
             else -> "New message"
         }
 
-        // For group chats, extract first name for cleaner notification display
-        val displaySenderName = if (isGroup && senderName != null) {
-            extractFirstName(senderName)
-        } else {
-            senderName
-        }
-
-        // Show notification
-        Timber.d("DEBUG: Showing notification - chatTitle=$chatTitle, notificationText=$notificationText, displaySenderName=$displaySenderName, isGroup=$isGroup")
-        notificationService.showMessageNotification(
-            com.bothbubbles.services.notifications.MessageNotificationParams(
-                chatGuid = chatGuid,
-                chatTitle = chatTitle,
-                messageText = notificationText,
-                messageGuid = messageGuid,
-                senderName = displaySenderName,
-                senderAddress = senderAddress,
-                isGroup = isGroup,
-                avatarUri = senderAvatarUri,
-                participantNames = participantNames,
-                participantAvatarPaths = participantAvatarPaths,
-                // Priority: UnifiedChatEntity avatar > ChatEntity serverGroupPhotoPath (fallback for group chats)
-                groupAvatarPath = unifiedChat?.effectiveAvatarPath ?: chat?.serverGroupPhotoPath,
-                subject = messageSubject
-            )
+        // Build notification params using shared builder (ensures consistent contact caching and link preview)
+        val params = notificationParamsBuilder.buildParams(
+            messageGuid = messageGuid,
+            chatGuid = chatGuid,
+            messageText = notificationText,
+            subject = messageSubject,
+            senderAddress = senderAddress,
+            fetchLinkPreview = !isInvisibleInk, // Now FCM gets link previews too
+            isInvisibleInk = isInvisibleInk
         )
-        Timber.d("DEBUG: Notification shown successfully!")
+
+        if (params != null) {
+            Timber.d("DEBUG: Showing FCM notification - chatTitle=${params.chatTitle}, notificationText=${params.messageText}")
+            notificationService.showMessageNotification(params)
+            Timber.d("DEBUG: Notification shown successfully!")
+        }
 
         // Sync this chat first to ensure message and attachments are saved to database
         // We must await this before downloading attachments, otherwise the attachment record won't exist
         syncChatAndDownloadAttachment(chatGuid, messageJson)
-    }
-
-    /**
-     * Resolve sender name and avatar from address.
-     * Priority: device contact > cached contact name > server-provided name > formatted address
-     * Returns Pair of (name, avatarUri)
-     */
-    private suspend fun resolveSenderNameAndAvatar(address: String?, serverProvidedName: String?): Pair<String?, String?> {
-        if (address.isNullOrBlank()) {
-            return serverProvidedName to null
-        }
-
-        // Try live contact lookup first
-        val contactName = androidContactsService.getContactDisplayName(address)
-        if (contactName != null) {
-            val photoUri = androidContactsService.getContactPhotoUri(address)
-            // Cache the contact name for future lookups
-            val localHandle = handleDao.getHandlesByAddress(address).firstOrNull()
-            localHandle?.let { handle ->
-                handleDao.updateCachedContactInfo(handle.id, contactName, photoUri)
-            }
-            return contactName to photoUri
-        }
-
-        // Check for cached contact info in local handle
-        val localHandle = handleDao.getHandlesByAddress(address).firstOrNull()
-        if (localHandle?.cachedDisplayName != null) {
-            return localHandle.cachedDisplayName to localHandle.cachedAvatarPath
-        }
-
-        // Fall back to inferred name
-        if (localHandle?.inferredName != null) {
-            return localHandle.displayName to localHandle.cachedAvatarPath // includes "Maybe:" prefix
-        }
-
-        // Fall back to server-provided name or formatted address
-        val fallback = serverProvidedName ?: PhoneNumberFormatter.format(address)
-        return fallback to null
     }
 
     /**
@@ -377,53 +303,28 @@ class FcmMessageHandler @Inject constructor(
 
         val chat = chatDao.getChatByGuid(chatGuid)
         val unifiedChat = chat?.unifiedChatId?.let { unifiedChatDao.getById(it) }
-        val senderAddress = messageDto.handle?.address
 
         // Check notification settings
         if (unifiedChat?.notificationsEnabled == false) return
         if (unifiedChat?.isSnoozed == true) return
 
-        val (senderName, senderAvatarUri) = resolveSenderNameAndAvatar(senderAddress, null)
         val messageText = messageDto.text ?: return
-
-        // For group chats, extract first name for cleaner notification display
-        val displaySenderName = if (chat?.isGroup == true && senderName != null) {
-            extractFirstName(senderName)
-        } else {
-            senderName
-        }
-
-        // Fetch participants for chat title resolution
-        val participants = chatRepository.getParticipantsForChat(chatGuid)
-        val participantNames = participants.map { it.rawDisplayName }
-        val participantAvatarPaths = participants.map { it.cachedAvatarPath }
-
-        val chatTitle = if (chat != null) {
-            chatRepository.resolveChatTitle(chat, participants)
-        } else {
-            senderName ?: PhoneNumberFormatter.format(senderAddress ?: "")
-        }
 
         Timber.d("Updating notification for edited message via FCM: ${messageDto.guid}")
 
-        // Show updated notification (same messageGuid = replaces existing notification)
-        notificationService.showMessageNotification(
-            com.bothbubbles.services.notifications.MessageNotificationParams(
-                chatGuid = chatGuid,
-                chatTitle = chatTitle,
-                messageText = messageText,
-                messageGuid = messageDto.guid,
-                senderName = displaySenderName,
-                senderAddress = senderAddress,
-                isGroup = chat?.isGroup ?: false,
-                avatarUri = senderAvatarUri,
-                participantNames = participantNames,
-                participantAvatarPaths = participantAvatarPaths,
-                // Priority: UnifiedChatEntity avatar > ChatEntity serverGroupPhotoPath (fallback for group chats)
-                groupAvatarPath = unifiedChat?.effectiveAvatarPath ?: chat?.serverGroupPhotoPath,
-                subject = messageDto.subject
-            )
+        // Build notification params using shared builder (ensures consistent contact caching)
+        val params = notificationParamsBuilder.buildParams(
+            messageGuid = messageDto.guid,
+            chatGuid = chatGuid,
+            messageText = messageText,
+            subject = messageDto.subject,
+            senderAddress = messageDto.handle?.address,
+            fetchLinkPreview = false // Edit notifications don't need link preview
         )
+
+        if (params != null) {
+            notificationService.showMessageNotification(params)
+        }
     }
 
     private fun handleFaceTimeCall(data: Map<String, String>) {
@@ -514,22 +415,6 @@ class FcmMessageHandler @Inject constructor(
             // Now that sync is complete, enqueue attachment download
             enqueueFirstImageAttachment(messageJson, chatGuid)
         }
-    }
-
-    /**
-     * Extract the first name from a full name, excluding emojis and non-letter characters.
-     * If the input is a phone number (no letters), returns the full input unchanged.
-     */
-    private fun extractFirstName(fullName: String): String {
-        val words = fullName.trim().split(Regex("\\s+"))
-        for (word in words) {
-            val cleaned = word.filter { it.isLetterOrDigit() }
-            if (cleaned.isNotEmpty() && cleaned.any { it.isLetter() }) {
-                return cleaned
-            }
-        }
-        // No letters found - this is likely a phone number, return as-is
-        return fullName
     }
 
     /**

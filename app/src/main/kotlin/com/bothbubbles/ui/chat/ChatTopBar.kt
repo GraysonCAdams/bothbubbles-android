@@ -179,7 +179,8 @@ private fun ChatTopBarContent(
                     Avatar(
                         name = chatTitle,
                         avatarPath = groupPhotoPath,
-                        size = 40.dp
+                        size = 40.dp,
+                        hasContactInfo = hasSavedContact
                     )
                 } else if (isGroup && participantNames.size > 1) {
                     // Fall back to participant collage
@@ -193,7 +194,8 @@ private fun ChatTopBarContent(
                     Avatar(
                         name = chatTitle,
                         avatarPath = avatarPath,
-                        size = 40.dp
+                        size = 40.dp,
+                        hasContactInfo = hasSavedContact
                     )
                 }
                 Spacer(modifier = Modifier.width(12.dp))

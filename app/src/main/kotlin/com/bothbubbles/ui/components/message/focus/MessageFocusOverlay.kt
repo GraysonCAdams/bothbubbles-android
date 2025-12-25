@@ -69,6 +69,9 @@ fun MessageFocusOverlay(
     onReply: () -> Unit = {},
     onCopy: () -> Unit = {},
     onForward: () -> Unit = {},
+    onAddToTasks: () -> Unit = {},
+    onPin: () -> Unit = {},
+    onStar: () -> Unit = {},
     onSelect: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -185,6 +188,8 @@ fun MessageFocusOverlay(
                 canReply = state.canReply,
                 canCopy = state.canCopy,
                 canForward = state.canForward,
+                isPinned = state.isPinned,
+                isStarred = state.isStarred,
                 onReactionSelected = { tapback ->
                     onReactionSelected(tapback)
                     onDismiss()
@@ -199,6 +204,18 @@ fun MessageFocusOverlay(
                 },
                 onForward = {
                     onForward()
+                    onDismiss()
+                },
+                onAddToTasks = {
+                    onAddToTasks()
+                    onDismiss()
+                },
+                onPin = {
+                    onPin()
+                    onDismiss()
+                },
+                onStar = {
+                    onStar()
                     onDismiss()
                 },
                 onSelect = {

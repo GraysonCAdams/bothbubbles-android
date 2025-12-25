@@ -19,6 +19,7 @@ import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.ContactCalendarAssociation
 import com.bothbubbles.data.repository.ContactCalendarRepository
 import com.bothbubbles.data.repository.Life360Repository
+import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.services.calendar.DeviceCalendar
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.contacts.DiscordContactService
@@ -122,7 +123,8 @@ class ConversationDetailsViewModel @Inject constructor(
     private val calendarRepository: ContactCalendarRepository,
     private val life360Repository: Life360Repository,
     private val life360Service: Life360Service,
-    private val featurePreferences: FeaturePreferences
+    private val featurePreferences: FeaturePreferences,
+    private val messageRepository: MessageRepository
 ) : ViewModel() {
 
     private val route: Screen.ChatDetails = savedStateHandle.toRoute()
@@ -137,6 +139,10 @@ class ConversationDetailsViewModel @Inject constructor(
     // Life360 refresh state
     private val _isRefreshingLife360 = MutableStateFlow(false)
     val isRefreshingLife360: StateFlow<Boolean> = _isRefreshingLife360.asStateFlow()
+
+    // Starred message count (loaded separately to avoid expanding the combine)
+    private val _starredMessageCount = MutableStateFlow(0)
+    val starredMessageCount: StateFlow<Int> = _starredMessageCount.asStateFlow()
 
     // Life360 automatic polling job (foreground-only)
     private var life360PollingJob: Job? = null
@@ -231,6 +237,16 @@ class ConversationDetailsViewModel @Inject constructor(
 
         // Start Life360 polling when a member is linked to this chat
         startLife360Polling()
+
+        // Load starred message count
+        loadStarredMessageCount()
+    }
+
+    private fun loadStarredMessageCount() {
+        viewModelScope.launch {
+            val count = messageRepository.getStarredMessageCount(chatGuid)
+            _starredMessageCount.value = count
+        }
     }
 
     fun toggleStarred() {

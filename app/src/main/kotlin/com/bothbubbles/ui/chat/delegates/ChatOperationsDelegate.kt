@@ -413,6 +413,34 @@ class ChatOperationsDelegate @AssistedInject constructor(
     }
 
     // ============================================================================
+    // MESSAGE PINNING & STARRING
+    // ============================================================================
+
+    /**
+     * Toggle the pinned status of a message.
+     * Pinned messages appear at the top of the conversation.
+     *
+     * @param messageGuid The GUID of the message to toggle
+     * @return Result with the new pinned state (true = pinned, false = unpinned)
+     */
+    suspend fun toggleMessagePinned(messageGuid: String): Result<Boolean> {
+        Timber.d("toggleMessagePinned: messageGuid=$messageGuid")
+        return messageRepository.toggleMessagePinned(messageGuid)
+    }
+
+    /**
+     * Toggle the starred status of a message.
+     * Starred messages can be viewed in the conversation details.
+     *
+     * @param messageGuid The GUID of the message to toggle
+     * @return Result with the new starred state (true = starred, false = unstarred)
+     */
+    suspend fun toggleMessageStarred(messageGuid: String): Result<Boolean> {
+        Timber.d("toggleMessageStarred: messageGuid=$messageGuid")
+        return messageRepository.toggleMessageStarred(messageGuid)
+    }
+
+    // ============================================================================
     // MESSAGE DELETION
     // ============================================================================
 

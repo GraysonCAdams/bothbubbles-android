@@ -20,7 +20,8 @@ internal fun NotificationSettingsHeader(
     subtitle: String,
     isGroup: Boolean,
     participantNames: List<String>,
-    avatarPath: String?
+    avatarPath: String?,
+    hasContactInfo: Boolean = false
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -31,6 +32,7 @@ internal fun NotificationSettingsHeader(
             isGroup = isGroup,
             participantNames = participantNames,
             avatarPath = avatarPath,
+            hasContactInfo = hasContactInfo,
             size = 80.dp
         )
 

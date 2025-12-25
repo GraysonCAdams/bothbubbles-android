@@ -1,5 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Static shortcut: New Message -->
+    <shortcut
+        android:shortcutId="compose"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_compose"
+        android:shortcutShortLabel="@string/new_message"
+        android:shortcutLongLabel="@string/new_message">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.bothbubbles.messaging"
+            android:targetClass="com.bothbubbles.MainActivity">
+            <extra android:name="navigate_to" android:value="compose" />
+        </intent>
+    </shortcut>
+
     <!-- Share target for direct conversation shortcuts -->
     <share-target android:targetClass="com.bothbubbles.MainActivity">
         <data android:mimeType="*/*" />

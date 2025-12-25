@@ -44,7 +44,13 @@ data class MessageFocusState(
     val canForward: Boolean = true,
 
     /** Whether reply action is available */
-    val canReply: Boolean = false
+    val canReply: Boolean = false,
+
+    /** Whether the message is pinned */
+    val isPinned: Boolean = false,
+
+    /** Whether the message is starred (bookmarked) */
+    val isStarred: Boolean = false
 ) {
     companion object {
         /** Default empty state */

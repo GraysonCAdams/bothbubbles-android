@@ -75,12 +75,16 @@ fun TapbackPopup(
     canReply: Boolean = false,
     canCopy: Boolean = true,
     canForward: Boolean = true,
+    isPinned: Boolean = false,
+    isStarred: Boolean = false,
     showReactions: Boolean = true,
     onDismiss: () -> Unit,
     onReactionSelected: (Tapback) -> Unit = {},
     onReply: () -> Unit = {},
     onCopy: () -> Unit = {},
-    onForward: () -> Unit = {}
+    onForward: () -> Unit = {},
+    onPin: () -> Unit = {},
+    onStar: () -> Unit = {}
 ) {
     // Decouple visibility from presence for animation
     var isPresent by remember { mutableStateOf(false) }
@@ -171,6 +175,8 @@ fun TapbackPopup(
                     canReply = canReply,
                     canCopy = canCopy,
                     canForward = canForward,
+                    isPinned = isPinned,
+                    isStarred = isStarred,
                     onReactionSelected = { tapback ->
                         scope.launch {
                             onReactionSelected(tapback)
@@ -194,12 +200,26 @@ fun TapbackPopup(
                             onForward()
                             closeWithAnimation()
                         }
+                    },
+                    onPin = {
+                        scope.launch {
+                            onPin()
+                            closeWithAnimation()
+                        }
+                    },
+                    onStar = {
+                        scope.launch {
+                            onStar()
+                            closeWithAnimation()
+                        }
                     }
                 )
             } else {
                 ActionOnlyCard(
                     canCopy = canCopy,
                     canForward = canForward,
+                    isPinned = isPinned,
+                    isStarred = isStarred,
                     onCopy = {
                         scope.launch {
                             onCopy()
@@ -209,6 +229,18 @@ fun TapbackPopup(
                     onForward = {
                         scope.launch {
                             onForward()
+                            closeWithAnimation()
+                        }
+                    },
+                    onPin = {
+                        scope.launch {
+                            onPin()
+                            closeWithAnimation()
+                        }
+                    },
+                    onStar = {
+                        scope.launch {
+                            onStar()
                             closeWithAnimation()
                         }
                     }

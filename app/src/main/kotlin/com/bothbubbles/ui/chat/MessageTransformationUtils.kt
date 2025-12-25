@@ -2,6 +2,7 @@ package com.bothbubbles.ui.chat
 
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
+import com.bothbubbles.services.contacts.DisplayNameResolver
 import com.bothbubbles.ui.components.message.AttachmentUiModel
 import com.bothbubbles.ui.components.message.EditHistoryEntry
 import com.bothbubbles.ui.components.message.MessageUiModel
@@ -10,7 +11,6 @@ import com.bothbubbles.ui.components.message.ReplyPreviewData
 import com.bothbubbles.ui.components.message.Tapback
 import com.bothbubbles.ui.util.toStable
 import com.bothbubbles.util.EmojiUtils.analyzeEmojis
-import com.bothbubbles.util.PhoneNumberFormatter
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -22,13 +22,17 @@ object MessageTransformationUtils {
 
     /**
      * Convert MessageEntity to MessageUiModel with all associated data.
+     *
+     * @param reactions List of reaction messages for this message
+     * @param attachments List of attachments for this message
+     * @param lookupMaps Lookup maps from DisplayNameResolver.buildLookupMaps()
+     * @param replyPreview Reply preview data if this message is a reply
+     * @param editHistory Edit history entries if this message was edited
      */
     fun MessageEntity.toUiModel(
         reactions: List<MessageEntity> = emptyList(),
         attachments: List<AttachmentEntity> = emptyList(),
-        handleIdToName: Map<Long, String> = emptyMap(),
-        addressToName: Map<String, String> = emptyMap(),
-        addressToAvatarPath: Map<String, String?> = emptyMap(),
+        lookupMaps: DisplayNameResolver.LookupMaps = EMPTY_LOOKUP_MAPS,
         replyPreview: ReplyPreviewData? = null,
         editHistory: List<EditHistoryEntry> = emptyList()
     ): MessageUiModel {
@@ -59,8 +63,7 @@ object MessageTransformationUtils {
                     senderName = resolveSenderName(
                         reaction.senderAddress,
                         reaction.handleId,
-                        addressToName,
-                        handleIdToName
+                        lookupMaps
                     )
                 )
             }
@@ -115,9 +118,10 @@ object MessageTransformationUtils {
             isReaction = associatedMessageType?.contains("reaction") == true,
             attachments = attachmentUiModels.toStable(),
             // Resolve sender name: try senderAddress first (most accurate), then fall back to handleId lookup
-            senderName = resolveSenderName(senderAddress, handleId, addressToName, handleIdToName),
-            senderAvatarPath = resolveSenderAvatarPath(senderAddress, addressToAvatarPath),
+            senderName = resolveSenderName(senderAddress, handleId, lookupMaps),
+            senderAvatarPath = resolveSenderAvatarPath(senderAddress, lookupMaps),
             senderAddress = senderAddress,
+            senderHasContactInfo = resolveSenderHasContactInfo(senderAddress, lookupMaps),
             messageSource = messageSource,
             reactions = allReactions.toStable(),
             myReactions = myReactions,
@@ -235,23 +239,25 @@ object MessageTransformationUtils {
     /**
      * Resolve sender name from available data sources.
      * Priority: senderAddress lookup > handleId lookup > formatted address
+     *
+     * Uses full names (with "Maybe:" prefix for inferred names) to be consistent
+     * with conversation list and chat title bar.
      */
     private fun resolveSenderName(
         senderAddress: String?,
         handleId: Long?,
-        addressToName: Map<String, String>,
-        handleIdToName: Map<Long, String>
+        lookupMaps: DisplayNameResolver.LookupMaps
     ): String? {
         // 1. Try looking up by senderAddress (most accurate for group chats)
         senderAddress?.let { address ->
             val normalized = normalizeAddress(address)
-            addressToName[normalized]?.let { return it }
+            lookupMaps.fullName.addressToName[normalized]?.let { return it }
             // No contact match - return formatted phone number
-            return PhoneNumberFormatter.format(address)
+            return formatAddress(address)
         }
 
         // 2. Fall back to handleId lookup
-        return handleId?.let { handleIdToName[it] }
+        return handleId?.let { lookupMaps.fullName.handleIdToName[it] }
     }
 
     /**
@@ -259,12 +265,56 @@ object MessageTransformationUtils {
      */
     private fun resolveSenderAvatarPath(
         senderAddress: String?,
-        addressToAvatarPath: Map<String, String?>
+        lookupMaps: DisplayNameResolver.LookupMaps
     ): String? {
         senderAddress?.let { address ->
             val normalized = normalizeAddress(address)
-            return addressToAvatarPath[normalized]
+            return lookupMaps.addressToAvatarPath[normalized]
         }
         return null
     }
+
+    /**
+     * Resolve whether sender has saved contact info.
+     * Used to prevent false business icon detection for contacts named like "ALICE".
+     */
+    private fun resolveSenderHasContactInfo(
+        senderAddress: String?,
+        lookupMaps: DisplayNameResolver.LookupMaps
+    ): Boolean {
+        senderAddress?.let { address ->
+            val normalized = normalizeAddress(address)
+            return lookupMaps.addressToHasContactInfo[normalized] ?: false
+        }
+        return false
+    }
+
+    /**
+     * Format an address as a display string.
+     * For phone numbers, formats with proper spacing.
+     * For emails, returns as-is.
+     */
+    private fun formatAddress(address: String): String {
+        return if (address.contains("@")) {
+            address
+        } else {
+            // Format phone number for display
+            val digits = address.filter { it.isDigit() || it == '+' }
+            if (digits.length >= 10) {
+                // US format: (xxx) xxx-xxxx
+                val normalized = digits.takeLast(10)
+                "(${normalized.take(3)}) ${normalized.substring(3, 6)}-${normalized.takeLast(4)}"
+            } else {
+                address
+            }
+        }
+    }
+
+    /** Empty lookup maps for default parameter value */
+    private val EMPTY_LOOKUP_MAPS = DisplayNameResolver.LookupMaps(
+        fullName = DisplayNameResolver.NameMaps(emptyMap(), emptyMap()),
+        rawName = DisplayNameResolver.NameMaps(emptyMap(), emptyMap()),
+        firstName = DisplayNameResolver.NameMaps(emptyMap(), emptyMap()),
+        addressToAvatarPath = emptyMap()
+    )
 }

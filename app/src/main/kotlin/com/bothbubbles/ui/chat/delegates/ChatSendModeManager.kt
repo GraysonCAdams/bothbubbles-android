@@ -2,7 +2,6 @@ package com.bothbubbles.ui.chat.delegates
 
 import timber.log.Timber
 import com.bothbubbles.data.local.prefs.SettingsDataStore
-import com.bothbubbles.core.network.api.BothBubblesApi
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.services.imessage.IMessageAvailabilityService
 import com.bothbubbles.services.messaging.ChatFallbackTracker
@@ -46,7 +45,6 @@ class ChatSendModeManager @AssistedInject constructor(
     private val chatRepository: ChatRepository,
     private val smsPermissionHelper: SmsPermissionHelper,
     private val chatFallbackTracker: ChatFallbackTracker,
-    private val api: BothBubblesApi,
     @Assisted private val chatGuid: String,
     @Assisted private val scope: CoroutineScope,
     @Assisted private val initialSendMode: ChatSendMode,
@@ -270,8 +268,9 @@ class ChatSendModeManager @AssistedInject constructor(
 
             try {
                 Timber.d("Checking iMessage availability for $participantPhone")
-                val response = api.checkIMessageAvailability(participantPhone)
-                if (response.isSuccessful && response.body()?.data?.available == true) {
+                // Use IMessageAvailabilityService for consistent caching and retry logic
+                val result = iMessageAvailabilityService.checkAvailability(participantPhone)
+                if (result.getOrNull() == true) {
                     Timber.d("iMessage now available, exiting fallback mode")
                     chatFallbackTracker.exitFallbackMode(chatGuid)
                 }

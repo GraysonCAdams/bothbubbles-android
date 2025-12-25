@@ -770,7 +770,12 @@ fun ChatScreen(
                 // Social media video fullscreen opens Reels feed
                 onOpenReelsFeed = {
                     currentState.showReelsFeed = true
-                }
+                },
+                onTogglePin = viewModel::toggleMessagePinned,
+                onToggleStar = viewModel::toggleMessageStarred,
+                // Chat context for reminder deep links
+                chatGuid = currentChatGuid,
+                chatTitle = currentChatInfoState.chatTitle
             )
         }
 

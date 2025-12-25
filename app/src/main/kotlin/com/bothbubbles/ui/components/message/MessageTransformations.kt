@@ -2,6 +2,7 @@ package com.bothbubbles.ui.components.message
 
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
+import com.bothbubbles.services.contacts.DisplayNameResolver
 import com.bothbubbles.ui.components.message.AttachmentUiModel
 import com.bothbubbles.ui.components.message.MessageUiModel
 import com.bothbubbles.ui.components.message.ReplyPreviewData
@@ -148,7 +149,10 @@ fun MessageEntity.toUiModel(
         editHistory = editHistory.toStable(),
         // Link embed fields
         isLinkEmbed = isLinkEmbed,
-        linkEmbedUrl = linkEmbedUrl
+        linkEmbedUrl = linkEmbedUrl,
+        // Pinning and starring
+        isPinned = isPinned,
+        isStarred = isBookmarked
     )
 }
 
@@ -319,24 +323,13 @@ fun formatGroupEventText(
     }
 }
 
+// Use centralized resolver for first name extraction
+private val displayNameResolver = DisplayNameResolver()
+
 /**
  * Extract the first name from a full name for cleaner display.
- * Handles phone numbers by returning them as-is.
+ * Delegates to centralized DisplayNameResolver for consistency.
  */
 private fun extractFirstName(fullName: String): String {
-    // If it looks like a phone number, return as-is
-    val stripped = fullName.replace(Regex("[+\\-()\\s]"), "")
-    if (stripped.all { it.isDigit() } && stripped.length >= 5) {
-        return fullName
-    }
-
-    // Get first word that contains letters
-    val words = fullName.trim().split(Regex("\\s+"))
-    for (word in words) {
-        val cleaned = word.filter { it.isLetterOrDigit() }
-        if (cleaned.isNotEmpty() && cleaned.any { it.isLetter() }) {
-            return cleaned
-        }
-    }
-    return words.firstOrNull() ?: fullName
+    return displayNameResolver.extractFirstName(fullName)
 }

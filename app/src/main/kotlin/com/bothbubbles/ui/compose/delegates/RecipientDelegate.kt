@@ -1,18 +1,16 @@
 package com.bothbubbles.ui.compose.delegates
 
 import timber.log.Timber
-import com.bothbubbles.core.data.ConnectionState
-import com.bothbubbles.core.network.api.BothBubblesApi
-import com.bothbubbles.data.local.prefs.SettingsDataStore
-import com.bothbubbles.data.repository.HandleRepository
 import com.bothbubbles.services.contacts.ContactPhotoLoader
 import com.bothbubbles.services.contacts.ContactQueryHelper
-import com.bothbubbles.services.socket.SocketConnection
+import com.bothbubbles.services.imessage.AddressServiceResolver
+import com.bothbubbles.services.imessage.MessagingService
+import com.bothbubbles.services.imessage.ServiceResolution
 import com.bothbubbles.ui.compose.RecipientChip
 import com.bothbubbles.ui.compose.RecipientService
 import com.bothbubbles.ui.compose.RecipientSuggestion
 import com.bothbubbles.ui.conversations.formatDisplayName
-import com.bothbubbles.util.parsing.PhoneAndCodeParsingUtils
+import com.bothbubbles.util.parsing.AddressValidator
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
@@ -20,7 +18,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.util.UUID
 import javax.inject.Inject
@@ -35,10 +32,7 @@ import javax.inject.Inject
  * - Group chat locking rules
  */
 class RecipientDelegate @Inject constructor(
-    private val api: BothBubblesApi,
-    private val socketConnection: SocketConnection,
-    private val settingsDataStore: SettingsDataStore,
-    private val handleRepository: HandleRepository,
+    private val addressServiceResolver: AddressServiceResolver,
     private val contactQueryHelper: ContactQueryHelper,
     private val contactPhotoLoader: ContactPhotoLoader
 ) {
@@ -200,63 +194,44 @@ class RecipientDelegate @Inject constructor(
 
     /**
      * Validate address format and return initial service type.
+     * Uses AddressValidator for consistent validation across the app.
      */
     private fun validateAddressFormat(address: String): Pair<Boolean, RecipientService> {
-        return when {
-            address.isEmail() -> true to RecipientService.IMESSAGE // Emails are always iMessage
-            address.isPhoneNumber() -> true to RecipientService.SMS // Default to SMS, will check iMessage
-            else -> false to RecipientService.INVALID
+        return when (AddressValidator.validate(address)) {
+            AddressValidator.AddressType.Email -> true to RecipientService.IMESSAGE
+            AddressValidator.AddressType.Phone -> true to RecipientService.SMS // Default to SMS, will check iMessage
+            AddressValidator.AddressType.Invalid -> false to RecipientService.INVALID
         }
     }
 
     /**
      * Check iMessage availability and update chip service.
+     * Uses AddressServiceResolver for consistent resolution with timeout and caching.
      */
     private suspend fun checkAndUpdateService(chipId: String, address: String) {
         try {
-            val smsOnlyMode = settingsDataStore.smsOnlyMode.first()
-            Timber.d("checkAndUpdateService: address=$address, smsOnlyMode=$smsOnlyMode")
+            Timber.d("checkAndUpdateService: address=$address")
 
-            // In SMS-only mode, keep as SMS
-            if (smsOnlyMode) {
-                Timber.d("checkAndUpdateService: SMS-only mode, keeping as SMS")
-                return
-            }
+            val resolution = addressServiceResolver.resolveService(address)
+            Timber.d("checkAndUpdateService: resolution=$resolution")
 
-            // Check if it's an email (always iMessage)
-            if (address.isEmail()) {
-                Timber.d("checkAndUpdateService: email detected, updating to iMessage")
-                updateChipService(chipId, RecipientService.IMESSAGE)
-                return
-            }
-
-            // Check cached handle first (local lookup, doesn't need server connection)
-            val normalizedAddress = PhoneAndCodeParsingUtils.normalizePhoneNumber(address)
-            Timber.d("checkAndUpdateService: normalizedAddress=$normalizedAddress")
-
-            val cachedHandle = handleRepository.getHandleByAddressAny(address)
-                ?: handleRepository.getHandleByAddressAny(normalizedAddress)
-            Timber.d("checkAndUpdateService: cachedHandle=$cachedHandle, isIMessage=${cachedHandle?.isIMessage}")
-
-            if (cachedHandle?.isIMessage == true) {
-                Timber.d("checkAndUpdateService: cached handle is iMessage, updating chip")
-                updateChipService(chipId, RecipientService.IMESSAGE)
-                return
-            }
-
-            // If connected, check with server for fresh availability
-            val isConnected = socketConnection.connectionState.value == ConnectionState.CONNECTED
-            Timber.d("checkAndUpdateService: isConnected=$isConnected")
-
-            if (isConnected) {
-                val response = api.checkIMessageAvailability(address)
-                Timber.d("checkAndUpdateService: API response code=${response.code()}, available=${response.body()?.data?.available}")
-                if (response.isSuccessful && response.body()?.data?.available == true) {
-                    Timber.d("checkAndUpdateService: API confirmed iMessage available, updating chip")
-                    updateChipService(chipId, RecipientService.IMESSAGE)
+            when (resolution) {
+                is ServiceResolution.Resolved -> {
+                    val recipientService = when (resolution.service) {
+                        MessagingService.IMESSAGE -> RecipientService.IMESSAGE
+                        MessagingService.SMS -> RecipientService.SMS
+                    }
+                    Timber.d("checkAndUpdateService: resolved to $recipientService (source=${resolution.source})")
+                    updateChipService(chipId, recipientService)
                 }
-            } else {
-                Timber.d("checkAndUpdateService: not connected to server, keeping as SMS")
+                is ServiceResolution.Invalid -> {
+                    Timber.d("checkAndUpdateService: invalid address")
+                    updateChipService(chipId, RecipientService.INVALID)
+                }
+                is ServiceResolution.Pending -> {
+                    // Shouldn't happen with current implementation, but handle gracefully
+                    Timber.d("checkAndUpdateService: pending resolution")
+                }
             }
         } catch (e: Exception) {
             Timber.w(e, "Failed to check iMessage availability")
@@ -271,14 +246,5 @@ class RecipientDelegate @Inject constructor(
             currentChips[index] = currentChips[index].copy(service = service)
             _chips.value = currentChips.toImmutableList()
         }
-    }
-
-    private fun String.isPhoneNumber(): Boolean {
-        val cleaned = this.replace(Regex("[^0-9+]"), "")
-        return cleaned.startsWith("+") || (cleaned.length >= 10 && cleaned.all { it.isDigit() })
-    }
-
-    private fun String.isEmail(): Boolean {
-        return this.contains("@") && this.contains(".") && this.length > 5
     }
 }

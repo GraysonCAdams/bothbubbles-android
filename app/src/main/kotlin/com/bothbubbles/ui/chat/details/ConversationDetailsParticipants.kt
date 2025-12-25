@@ -89,7 +89,8 @@ fun ParticipantRow(
         Avatar(
             name = participant.displayName,
             avatarPath = participant.cachedAvatarPath,
-            size = 48.dp
+            size = 48.dp,
+            hasContactInfo = participant.cachedDisplayName != null
         )
         Spacer(modifier = Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {

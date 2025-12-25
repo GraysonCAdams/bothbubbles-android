@@ -5,7 +5,9 @@ import com.bothbubbles.core.data.prefs.SyncPreferences
 import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.dao.SocialMediaLinkDao
+import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.repository.HandleRepository
+import com.bothbubbles.services.contacts.DisplayNameResolver
 import com.bothbubbles.services.socialmedia.CachedVideo
 import com.bothbubbles.services.socialmedia.DownloadProgress
 import com.bothbubbles.services.socialmedia.SocialMediaCacheManager
@@ -41,6 +43,7 @@ class ChatReelsDelegate @Inject constructor(
     private val syncPreferences: SyncPreferences,
     private val featurePreferences: FeaturePreferences,
     private val handleRepository: HandleRepository,
+    private val displayNameResolver: DisplayNameResolver,
     private val messageDao: MessageDao,
     private val attachmentDao: AttachmentDao,
     private val socialMediaLinkDao: SocialMediaLinkDao
@@ -183,7 +186,7 @@ class ChatReelsDelegate @Inject constructor(
                         platform = platform,
                         messageGuid = link.messageGuid,
                         chatGuid = chatGuid,
-                        senderName = if (link.isFromMe) "You" else (handle?.cachedDisplayName ?: handle?.inferredName),
+                        senderName = if (link.isFromMe) "You" else handle?.let { resolveDisplayName(it) },
                         senderAddress = link.senderAddress,
                         sentTimestamp = link.sentTimestamp,
                         avatarPath = handle?.cachedAvatarPath,
@@ -220,7 +223,7 @@ class ChatReelsDelegate @Inject constructor(
                         "You"
                     } else {
                         linkData.senderAddress?.let { handleRepository.getHandleByAddressAny(it) }
-                            ?.let { it.cachedDisplayName ?: it.inferredName }
+                            ?.let { resolveDisplayName(it) }
                     }
 
                     cacheManager.updateCachedVideoMetadata(
@@ -293,7 +296,7 @@ class ChatReelsDelegate @Inject constructor(
                         ReactionUiModel(
                             tapback = tapback,
                             isFromMe = reaction.isFromMe,
-                            senderName = reactionHandle?.cachedDisplayName ?: reactionHandle?.inferredName
+                            senderName = reactionHandle?.let { resolveDisplayName(it) }
                         )
                     } else null
                 }
@@ -303,11 +306,16 @@ class ChatReelsDelegate @Inject constructor(
                     .find { it.attachmentVideo?.guid == video.attachment.guid }
                     ?.currentTapback
 
-                // Display name: "You" for sent messages, otherwise use handle info from query
+                // Display name: "You" for sent messages, otherwise use centralized resolver
                 val displayName = if (video.isFromMe) {
                     "You"
                 } else {
-                    video.displayName ?: video.formattedAddress ?: video.senderAddress
+                    displayNameResolver.resolveFromRawValues(
+                        cachedDisplayName = video.cachedDisplayName,
+                        inferredName = video.inferredName,
+                        formattedAddress = video.formattedAddress,
+                        senderAddress = video.senderAddress
+                    )
                 }
 
                 // Create AttachmentVideoData
@@ -375,9 +383,8 @@ class ChatReelsDelegate @Inject constructor(
             }
 
             val avatarPath = handle?.cachedAvatarPath
-            // Use fallback chain: handle lookup -> cached senderName -> senderAddress
-            val displayName = handle?.cachedDisplayName
-                ?: handle?.inferredName
+            // Use centralized resolver for consistent name display
+            val displayName = handle?.let { resolveDisplayName(it) }
                 ?: video.senderName
                 ?: senderAddress
 
@@ -406,12 +413,12 @@ class ChatReelsDelegate @Inject constructor(
                 val tapback = parseReactionType(reaction.associatedMessageType)
                 Timber.d("[Reels] Parsing reaction type=${reaction.associatedMessageType} -> tapback=$tapback")
                 if (tapback != null) {
-                    // Look up sender name for the reaction
+                    // Look up sender name for the reaction using centralized resolver
                     val reactionHandle = reaction.senderAddress?.let { handleRepository.getHandleByAddressAny(it) }
                     ReactionUiModel(
                         tapback = tapback,
                         isFromMe = reaction.isFromMe,
-                        senderName = reactionHandle?.cachedDisplayName ?: reactionHandle?.inferredName
+                        senderName = reactionHandle?.let { resolveDisplayName(it) }
                     )
                 } else null
             }
@@ -757,6 +764,14 @@ class ChatReelsDelegate @Inject constructor(
             // Fallback: just strip everything after ?
             url.substringBefore("?").trimEnd('/')
         }
+    }
+
+    /**
+     * Resolve display name from a handle using centralized DisplayNameResolver.
+     * Ensures consistent "Maybe:" prefix for inferred names.
+     */
+    private fun resolveDisplayName(handle: HandleEntity): String {
+        return displayNameResolver.resolveDisplayName(handle, DisplayNameResolver.DisplayMode.FULL)
     }
 }
 

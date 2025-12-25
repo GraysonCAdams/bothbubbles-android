@@ -67,6 +67,9 @@ sealed interface Screen {
     data class ChatDetails(val chatGuid: String) : Screen
 
     @Serializable
+    data class StarredMessages(val chatGuid: String) : Screen
+
+    @Serializable
     data class ChatNotificationSettings(val chatGuid: String) : Screen
 
     @Serializable

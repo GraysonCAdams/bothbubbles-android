@@ -130,7 +130,8 @@ fun SelectableContactTile(
                 Avatar(
                     name = contact.displayName,
                     avatarPath = contact.avatarPath,
-                    size = 48.dp
+                    size = 48.dp,
+                    hasContactInfo = true // These are saved contacts
                 )
 
                 // Selection indicator

@@ -1,5 +1,6 @@
 package com.bothbubbles.ui.chat.components
 
+import android.content.Intent
 import android.widget.Toast
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -25,6 +26,7 @@ import com.bothbubbles.ui.components.message.focus.MessageFocusOverlay
 import com.bothbubbles.ui.components.message.focus.MessageFocusState
 import kotlinx.collections.immutable.toImmutableSet
 import kotlinx.coroutines.launch
+import timber.log.Timber
 
 /**
  * Callbacks for message list overlay interactions.
@@ -33,7 +35,11 @@ data class MessageListOverlayCallbacks(
     val onToggleReaction: (messageGuid: String, tapback: Tapback) -> Unit,
     val onSetReplyTo: (guid: String) -> Unit,
     val onForwardRequest: (message: MessageUiModel) -> Unit,
-    val onEnterSelectionMode: (messageGuid: String) -> Unit
+    val onEnterSelectionMode: (messageGuid: String) -> Unit,
+    val onTogglePin: (messageGuid: String) -> Unit,
+    val onToggleStar: (messageGuid: String) -> Unit,
+    val chatGuid: String,
+    val senderName: String? = null
 )
 
 /**
@@ -138,7 +144,9 @@ fun MessageListOverlays(
                     canReact = selectedMessageForTapback.isServerOrigin && isServerConnected,
                     canCopy = !selectedMessageForTapback.text.isNullOrBlank(),
                     canForward = true,
-                    canReply = selectedMessageForTapback.isServerOrigin
+                    canReply = selectedMessageForTapback.isServerOrigin,
+                    isPinned = selectedMessageForTapback.isPinned,
+                    isStarred = selectedMessageForTapback.isStarred
                 )
             } else {
                 MessageFocusState.Empty
@@ -190,9 +198,58 @@ fun MessageListOverlays(
                     callbacks.onForwardRequest(message)
                 }
             },
+            onAddToTasks = {
+                selectedMessageForTapback?.let { message ->
+                    // Build deep link for task: bothbubbles://chat/{chatGuid}?message={messageGuid}
+                    val deepLink = "bothbubbles://chat/${callbacks.chatGuid}?message=${message.guid}"
+
+                    // Build task title and notes
+                    val senderDisplay = callbacks.senderName ?: "Message"
+                    val preview = message.text?.take(100) ?: "(attachment)"
+
+                    // Create intent to share to Google Tasks
+                    val intent = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_SUBJECT, "Message from $senderDisplay")
+                        putExtra(Intent.EXTRA_TEXT, "$preview\n\n$deepLink")
+                        setPackage("com.google.android.apps.tasks")
+                    }
+
+                    // Try Google Tasks first, fall back to share sheet
+                    try {
+                        if (intent.resolveActivity(context.packageManager) != null) {
+                            context.startActivity(intent)
+                        } else {
+                            // Google Tasks not installed - use general share sheet
+                            val chooserIntent = Intent.createChooser(
+                                Intent(Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(Intent.EXTRA_SUBJECT, "Message from $senderDisplay")
+                                    putExtra(Intent.EXTRA_TEXT, "$preview\n\n$deepLink")
+                                },
+                                "Add reminder via..."
+                            )
+                            context.startActivity(chooserIntent)
+                        }
+                    } catch (e: Exception) {
+                        Timber.e(e, "Failed to share to Tasks")
+                        Toast.makeText(context, "Could not open Tasks", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            },
             onSelect = {
                 selectedMessageForTapback?.let { message ->
                     callbacks.onEnterSelectionMode(message.guid)
+                }
+            },
+            onPin = {
+                selectedMessageForTapback?.let { message ->
+                    callbacks.onTogglePin(message.guid)
+                }
+            },
+            onStar = {
+                selectedMessageForTapback?.let { message ->
+                    callbacks.onToggleStar(message.guid)
                 }
             }
         )

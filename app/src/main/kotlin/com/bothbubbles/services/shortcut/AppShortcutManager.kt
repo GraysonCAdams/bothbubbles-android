@@ -50,7 +50,7 @@ class AppShortcutManager @Inject constructor(
     companion object {
         private const val TAG = "AppShortcutManager"
         private const val DEBOUNCE_MS = 5000L // 5 seconds debounce
-        private const val MAX_SHORTCUTS = 5
+        private const val MAX_SHORTCUTS = 4
         private const val SHORTCUT_ID_PREFIX = "popular_"
     }
 

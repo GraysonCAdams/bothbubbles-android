@@ -588,6 +588,91 @@ class MessageRepository @Inject constructor(
         messageDao.updateDatePlayed(messageGuid, System.currentTimeMillis())
     }
 
+    // ===== Pinning & Starring =====
+
+    /**
+     * Toggle the pinned status of a message.
+     */
+    suspend fun toggleMessagePinned(messageGuid: String): Result<Boolean> = runCatching {
+        val message = messageDao.getMessageByGuid(messageGuid)
+            ?: throw IllegalArgumentException("Message not found: $messageGuid")
+        val newPinned = !message.isPinned
+        messageDao.updatePinStatus(messageGuid, newPinned)
+        Timber.d("Toggled pin status for message $messageGuid to $newPinned")
+        newPinned
+    }
+
+    /**
+     * Set the pinned status of a message.
+     */
+    suspend fun setMessagePinned(messageGuid: String, isPinned: Boolean): Result<Unit> = runCatching {
+        messageDao.updatePinStatus(messageGuid, isPinned)
+    }
+
+    /**
+     * Toggle the starred (bookmarked) status of a message.
+     */
+    suspend fun toggleMessageStarred(messageGuid: String): Result<Boolean> = runCatching {
+        val message = messageDao.getMessageByGuid(messageGuid)
+            ?: throw IllegalArgumentException("Message not found: $messageGuid")
+        val newStarred = !message.isBookmarked
+        messageDao.updateStarStatus(messageGuid, newStarred)
+        Timber.d("Toggled star status for message $messageGuid to $newStarred")
+        newStarred
+    }
+
+    /**
+     * Set the starred (bookmarked) status of a message.
+     */
+    suspend fun setMessageStarred(messageGuid: String, isStarred: Boolean): Result<Unit> = runCatching {
+        messageDao.updateStarStatus(messageGuid, isStarred)
+    }
+
+    /**
+     * Get all pinned messages for a conversation.
+     * Automatically resolves unified chats.
+     */
+    suspend fun getPinnedMessagesForChat(chatGuid: String): List<MessageEntity> {
+        val mergedGuids = resolveUnifiedChatGuids(chatGuid)
+        return if (mergedGuids.size == 1) {
+            messageDao.getPinnedMessagesForChat(mergedGuids.first())
+        } else {
+            messageDao.getPinnedMessagesForChats(mergedGuids)
+        }
+    }
+
+    /**
+     * Get all starred messages for a conversation.
+     * Automatically resolves unified chats.
+     */
+    suspend fun getStarredMessagesForChat(chatGuid: String): List<MessageEntity> {
+        val mergedGuids = resolveUnifiedChatGuids(chatGuid)
+        return if (mergedGuids.size == 1) {
+            messageDao.getStarredMessagesForChat(mergedGuids.first())
+        } else {
+            messageDao.getStarredMessagesForChats(mergedGuids)
+        }
+    }
+
+    /**
+     * Observe starred messages for a unified chat (reactive).
+     */
+    fun observeStarredMessagesForUnifiedChat(unifiedChatId: String): Flow<List<MessageEntity>> =
+        messageDao.observeStarredMessagesForUnifiedChat(unifiedChatId)
+
+    /**
+     * Get count of starred messages for a conversation.
+     * Automatically resolves unified chats.
+     */
+    suspend fun getStarredMessageCount(chatGuid: String): Int {
+        val mergedGuids = resolveUnifiedChatGuids(chatGuid)
+        return if (mergedGuids.size == 1) {
+            messageDao.getStarredMessageCount(mergedGuids.first())
+        } else {
+            messageDao.getStarredMessageCountForChats(mergedGuids)
+        }
+    }
+
     // ===== Private Helpers =====
 
     private fun MessageDto.toEntity(chatGuid: String): MessageEntity {

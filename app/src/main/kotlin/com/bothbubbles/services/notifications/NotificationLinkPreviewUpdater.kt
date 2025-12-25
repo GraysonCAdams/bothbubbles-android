@@ -5,12 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.core.content.FileProvider
-import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.MessageDao
-import com.bothbubbles.data.local.db.dao.UnifiedChatDao
-import com.bothbubbles.data.local.db.entity.displayName
-import com.bothbubbles.data.local.db.entity.rawDisplayName
-import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.LinkPreviewCompletion
 import com.bothbubbles.data.repository.LinkPreviewRepository
 import com.bothbubbles.di.ApplicationScope
@@ -47,10 +42,8 @@ class NotificationLinkPreviewUpdater @Inject constructor(
     @ApplicationContext private val context: Context,
     private val linkPreviewRepository: LinkPreviewRepository,
     private val messageDao: MessageDao,
-    private val chatDao: ChatDao,
-    private val unifiedChatDao: UnifiedChatDao,
-    private val chatRepository: ChatRepository,
     private val notificationService: NotificationService,
+    private val notificationParamsBuilder: NotificationParamsBuilder,
     private val activeConversationManager: ActiveConversationManager,
     @ApplicationScope private val applicationScope: CoroutineScope,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
@@ -126,13 +119,6 @@ class NotificationLinkPreviewUpdater @Inject constructor(
                 return
             }
 
-            // Look up chat
-            val chat = chatDao.getChatByGuid(completion.chatGuid)
-            if (chat == null) {
-                Timber.w("$TAG: Chat not found: ${completion.chatGuid}")
-                return
-            }
-
             // Download preview image if available
             var attachmentUri: Uri? = null
             var attachmentMimeType: String? = null
@@ -155,50 +141,28 @@ class NotificationLinkPreviewUpdater @Inject constructor(
                 }
             }
 
-            // Get unified chat for avatar path
-            val unifiedChat = chat.unifiedChatId?.let { unifiedChatDao.getById(it) }
-
-            // Get participants and chat info
-            val participants = chatRepository.getParticipantsForChat(completion.chatGuid)
-            val participantNames = participants.map { it.rawDisplayName }
-            val participantAvatarPaths = participants.map { it.cachedAvatarPath }
-
-            // Resolve chat title
-            val chatTitle = chatRepository.resolveChatTitle(chat, participants)
-
-            // Get sender info
-            val senderAddress = message.senderAddress ?: ""
-            val senderParticipant = participants.find { it.address == senderAddress }
-            val senderName = senderParticipant?.displayName
-            val senderAvatarUri = senderParticipant?.cachedAvatarPath
-
             // Get message text
             val messageText = message.text ?: ""
 
             Timber.d("$TAG: Updating notification for chat ${completion.chatGuid} with link preview")
 
-            // Update the notification with link preview data
-            notificationService.showMessageNotification(
-                MessageNotificationParams(
-                    chatGuid = completion.chatGuid,
-                    chatTitle = chatTitle,
-                    messageText = messageText,
-                    messageGuid = message.guid,
-                    senderName = senderName,
-                    senderAddress = senderAddress,
-                    isGroup = chat.isGroup,
-                    avatarUri = senderAvatarUri,
-                    linkPreviewTitle = preview.title,
-                    linkPreviewDomain = preview.domain ?: preview.siteName,
-                    participantNames = participantNames,
-                    participantAvatarPaths = participantAvatarPaths,
-                    // Priority: UnifiedChatEntity avatar > ChatEntity serverGroupPhotoPath (fallback for group chats)
-                    groupAvatarPath = unifiedChat?.effectiveAvatarPath ?: chat.serverGroupPhotoPath,
-                    subject = message.subject,
-                    attachmentUri = attachmentUri,
-                    attachmentMimeType = attachmentMimeType
-                )
+            // Build notification params using shared builder (ensures consistent contact caching)
+            val params = notificationParamsBuilder.buildParams(
+                messageGuid = message.guid,
+                chatGuid = completion.chatGuid,
+                messageText = messageText,
+                subject = message.subject,
+                senderAddress = message.senderAddress,
+                linkPreviewTitle = preview.title,
+                linkPreviewDomain = preview.domain ?: preview.siteName,
+                attachmentUri = attachmentUri,
+                attachmentMimeType = attachmentMimeType,
+                fetchLinkPreview = false // Already have the link preview data
             )
+
+            if (params != null) {
+                notificationService.showMessageNotification(params)
+            }
         } catch (e: Exception) {
             Timber.e(e, "$TAG: Error updating notification for link preview")
         }

@@ -164,8 +164,10 @@ class NotificationBuilder @Inject constructor(
      *
      * @param channelId The notification channel ID (per-conversation channel)
      * @param senderAddress The sender's address (phone/email) used for bubble filtering
+     * @param senderHasContactInfo Whether the sender has saved contact info (prevents false business detection)
      * @param participantNames List of participant names for group chats (used for group avatar collage)
      * @param participantAvatarPaths List of avatar paths for group participants (corresponding to participantNames)
+     * @param participantHasContactInfo List of booleans indicating if each participant has saved contact info
      * @param groupAvatarPath Optional path to group avatar (customAvatarPath or serverGroupPhotoPath). Takes priority over collage.
      * @param subject Optional message subject. When present, shows ONLY the subject (not the body).
      * @param attachmentUri Optional content:// URI to an attachment image/video for inline preview
@@ -181,10 +183,12 @@ class NotificationBuilder @Inject constructor(
         senderAddress: String?,
         isGroup: Boolean,
         avatarUri: String?,
+        senderHasContactInfo: Boolean = false,
         linkPreviewTitle: String?,
         linkPreviewDomain: String?,
         participantNames: List<String>,
         participantAvatarPaths: List<String?> = emptyList(),
+        participantHasContactInfo: List<Boolean> = emptyList(),
         groupAvatarPath: String? = null,
         subject: String? = null,
         totalUnreadCount: Int,
@@ -298,18 +302,19 @@ class NotificationBuilder @Inject constructor(
             if (photoBitmap != null) {
                 IconCompat.createWithAdaptiveBitmap(photoBitmap)
             } else {
-                // Photo load failed, generate fallback avatar
+                // Photo load failed, generate fallback avatar with proper hasContactInfo
                 try {
-                    AvatarGenerator.generateAdaptiveIconCompat(context, senderDisplayName, 128)
+                    AvatarGenerator.generateAdaptiveIconCompat(context, senderDisplayName, 128, senderHasContactInfo)
                 } catch (e: Exception) {
                     Timber.w(e, "Failed to generate avatar bitmap")
                     null
                 }
             }
         } else {
-            // No contact photo available, generate avatar
+            // No contact photo available, generate avatar with proper hasContactInfo
+            // This ensures business detection works correctly (won't show building icon for saved contacts)
             try {
-                AvatarGenerator.generateAdaptiveIconCompat(context, senderDisplayName, 128)
+                AvatarGenerator.generateAdaptiveIconCompat(context, senderDisplayName, 128, senderHasContactInfo)
             } catch (e: Exception) {
                 Timber.w(e, "Failed to generate avatar bitmap")
                 null
@@ -354,7 +359,9 @@ class NotificationBuilder @Inject constructor(
             participantNames = participantNames,
             chatAvatarPath = groupAvatarPath,
             senderAvatarPath = if (!isGroup) avatarUri else null,
-            participantAvatarPaths = participantAvatarPaths
+            senderHasContactInfo = senderHasContactInfo,
+            participantAvatarPaths = participantAvatarPaths,
+            participantHasContactInfo = participantHasContactInfo
         )
 
         // Create bubble metadata if bubbles are enabled for this conversation

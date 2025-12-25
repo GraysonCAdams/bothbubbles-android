@@ -17,6 +17,8 @@ import com.bothbubbles.util.PhoneNumberFormatter
 /**
  * Large centered header with avatar and name.
  * Used as first item in scrollable content.
+ *
+ * @param hasContactInfo Whether the primary participant has saved contact info (prevents false business detection)
  */
 @Composable
 fun ConversationHeader(
@@ -26,6 +28,7 @@ fun ConversationHeader(
     participantNames: List<String>,
     participantAvatars: List<String?> = emptyList(),
     avatarPath: String?,
+    hasContactInfo: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -38,6 +41,7 @@ fun ConversationHeader(
             participantNames = participantNames,
             participantAvatars = participantAvatars,
             avatarPath = avatarPath,
+            hasContactInfo = hasContactInfo,
             size = 96.dp
         )
 

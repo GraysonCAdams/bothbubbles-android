@@ -9,6 +9,8 @@ import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.di.IoDispatcher
+import com.bothbubbles.services.avatar.AvatarResolver
+import com.bothbubbles.services.notifications.ShortcutRefreshManager
 import com.bothbubbles.util.PermissionStateMonitor
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
@@ -40,6 +42,8 @@ class ContactsContentObserver @Inject constructor(
     private val handleDao: HandleDao,
     private val androidContactsService: AndroidContactsService,
     private val permissionStateMonitor: PermissionStateMonitor,
+    private val avatarResolver: AvatarResolver,
+    private val shortcutRefreshManager: ShortcutRefreshManager,
     @ApplicationScope private val applicationScope: CoroutineScope,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
@@ -168,6 +172,15 @@ class ContactsContentObserver @Inject constructor(
             }
 
             Timber.i("Contact cache refresh complete. Updated $updated of ${handles.size} handles")
+
+            // If any contacts were updated, invalidate avatar cache and refresh shortcuts
+            if (updated > 0) {
+                Timber.d("Invalidating avatar cache after $updated contact updates")
+                avatarResolver.invalidateAll()
+
+                Timber.d("Refreshing conversation shortcuts with updated contact photos")
+                shortcutRefreshManager.refreshAllShortcuts()
+            }
         } catch (e: SecurityException) {
             // Permission was revoked during refresh - return gracefully
             Timber.w("SecurityException refreshing contacts cache - permission may have been revoked")

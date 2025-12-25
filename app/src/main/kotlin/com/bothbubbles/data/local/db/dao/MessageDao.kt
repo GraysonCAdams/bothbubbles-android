@@ -844,6 +844,91 @@ interface MessageDao {
     @Query("UPDATE messages SET sms_status = :smsStatus WHERE guid = :guid")
     suspend fun updateSmsStatus(guid: String, smsStatus: String)
 
+    // ===== Pinning & Starring =====
+
+    @Query("UPDATE messages SET is_pinned = :isPinned WHERE guid = :guid")
+    suspend fun updatePinStatus(guid: String, isPinned: Boolean)
+
+    @Query("UPDATE messages SET is_bookmarked = :isBookmarked WHERE guid = :guid")
+    suspend fun updateStarStatus(guid: String, isBookmarked: Boolean)
+
+    /**
+     * Get pinned messages for a chat, ordered by most recently created first.
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE chat_guid = :chatGuid AND is_pinned = 1 AND date_deleted IS NULL
+        ORDER BY date_created DESC
+    """)
+    suspend fun getPinnedMessagesForChat(chatGuid: String): List<MessageEntity>
+
+    /**
+     * Get pinned messages for multiple chats (merged iMessage + SMS conversations).
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE chat_guid IN (:chatGuids) AND is_pinned = 1 AND date_deleted IS NULL
+        ORDER BY date_created DESC
+    """)
+    suspend fun getPinnedMessagesForChats(chatGuids: List<String>): List<MessageEntity>
+
+    /**
+     * Get starred (bookmarked) messages for a chat, ordered by most recently created first.
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE chat_guid = :chatGuid AND is_bookmarked = 1 AND date_deleted IS NULL
+        ORDER BY date_created DESC
+    """)
+    suspend fun getStarredMessagesForChat(chatGuid: String): List<MessageEntity>
+
+    /**
+     * Get starred messages for multiple chats (merged iMessage + SMS conversations).
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE chat_guid IN (:chatGuids) AND is_bookmarked = 1 AND date_deleted IS NULL
+        ORDER BY date_created DESC
+    """)
+    suspend fun getStarredMessagesForChats(chatGuids: List<String>): List<MessageEntity>
+
+    /**
+     * Observe starred messages for a unified chat (reactive).
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE unified_chat_id = :unifiedChatId AND is_bookmarked = 1 AND date_deleted IS NULL
+        ORDER BY date_created DESC
+    """)
+    fun observeStarredMessagesForUnifiedChat(unifiedChatId: String): Flow<List<MessageEntity>>
+
+    /**
+     * Get count of pinned messages for a chat.
+     */
+    @Query("""
+        SELECT COUNT(*) FROM messages
+        WHERE chat_guid = :chatGuid AND is_pinned = 1 AND date_deleted IS NULL
+    """)
+    suspend fun getPinnedMessageCount(chatGuid: String): Int
+
+    /**
+     * Get count of starred messages for a chat.
+     */
+    @Query("""
+        SELECT COUNT(*) FROM messages
+        WHERE chat_guid = :chatGuid AND is_bookmarked = 1 AND date_deleted IS NULL
+    """)
+    suspend fun getStarredMessageCount(chatGuid: String): Int
+
+    /**
+     * Get count of starred messages for multiple chats.
+     */
+    @Query("""
+        SELECT COUNT(*) FROM messages
+        WHERE chat_guid IN (:chatGuids) AND is_bookmarked = 1 AND date_deleted IS NULL
+    """)
+    suspend fun getStarredMessageCountForChats(chatGuids: List<String>): Int
+
     /**
      * Get all local MMS messages that don't have sms_status set (for draft detection migration)
      */

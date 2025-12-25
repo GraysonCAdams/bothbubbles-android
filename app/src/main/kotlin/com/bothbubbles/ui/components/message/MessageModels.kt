@@ -191,6 +191,8 @@ data class MessageUiModel(
     val senderAvatarPath: String? = null,
     /** Sender's address (phone or email) for group chat avatar clicks */
     val senderAddress: String? = null,
+    /** Whether the sender has saved contact info (prevents false business detection) */
+    val senderHasContactInfo: Boolean = false,
     val messageSource: String,
     val reactions: StableList<ReactionUiModel> = emptyList<ReactionUiModel>().toStable(),
     val myReactions: Set<Tapback> = emptySet(),
@@ -228,7 +230,12 @@ data class MessageUiModel(
     /** Whether this message is a link embed (URL sent as rich preview) */
     val isLinkEmbed: Boolean = false,
     /** The URL for link embed messages (for preview lookup and display) */
-    val linkEmbedUrl: String? = null
+    val linkEmbedUrl: String? = null,
+    // Pinning and starring fields
+    /** Whether this message is pinned to the conversation */
+    val isPinned: Boolean = false,
+    /** Whether this message is starred (bookmarked) by the user */
+    val isStarred: Boolean = false
 ) {
     /** True if this is a sticker that was placed on another message */
     val isPlacedSticker: Boolean

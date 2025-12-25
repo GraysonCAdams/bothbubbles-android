@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 63,
-    "identityHash": "54050681f9b7ffb27796a154d8624bb7",
+    "identityHash": "7adac4c644ef4856dfff5fe0151c8551",
     "entities": [
       {
         "tableName": "chats",
@@ -120,7 +120,7 @@
       },
       {
         "tableName": "messages",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `guid` TEXT NOT NULL, `chat_guid` TEXT NOT NULL, `unified_chat_id` TEXT, `handle_id` INTEGER, `sender_address` TEXT, `text` TEXT, `subject` TEXT, `date_created` INTEGER NOT NULL, `date_read` INTEGER, `date_delivered` INTEGER, `date_edited` INTEGER, `date_played` INTEGER, `date_deleted` INTEGER, `is_from_me` INTEGER NOT NULL, `error` INTEGER NOT NULL, `item_type` INTEGER NOT NULL, `group_title` TEXT, `group_action_type` INTEGER NOT NULL, `balloon_bundle_id` TEXT, `associated_message_guid` TEXT, `associated_message_part` INTEGER, `associated_message_type` TEXT, `expressive_send_style_id` TEXT, `thread_originator_guid` TEXT, `thread_originator_part` TEXT, `has_attachments` INTEGER NOT NULL, `has_reactions` INTEGER NOT NULL, `big_emoji` INTEGER NOT NULL, `was_delivered_quietly` INTEGER NOT NULL, `did_notify_recipient` INTEGER NOT NULL, `is_bookmarked` INTEGER NOT NULL, `has_dd_results` INTEGER NOT NULL, `message_source` TEXT NOT NULL, `sms_id` INTEGER, `sms_thread_id` INTEGER, `sms_status` TEXT, `sim_slot` INTEGER, `sms_error_message` TEXT, `metadata` TEXT, `is_reaction` INTEGER NOT NULL DEFAULT 0, `split_batch_id` TEXT, `is_link_embed` INTEGER NOT NULL DEFAULT 0, `link_embed_url` TEXT, FOREIGN KEY(`chat_guid`) REFERENCES `chats`(`guid`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `guid` TEXT NOT NULL, `chat_guid` TEXT NOT NULL, `unified_chat_id` TEXT, `handle_id` INTEGER, `sender_address` TEXT, `text` TEXT, `subject` TEXT, `date_created` INTEGER NOT NULL, `date_read` INTEGER, `date_delivered` INTEGER, `date_edited` INTEGER, `date_played` INTEGER, `date_deleted` INTEGER, `is_from_me` INTEGER NOT NULL, `error` INTEGER NOT NULL, `item_type` INTEGER NOT NULL, `group_title` TEXT, `group_action_type` INTEGER NOT NULL, `balloon_bundle_id` TEXT, `associated_message_guid` TEXT, `associated_message_part` INTEGER, `associated_message_type` TEXT, `expressive_send_style_id` TEXT, `thread_originator_guid` TEXT, `thread_originator_part` TEXT, `has_attachments` INTEGER NOT NULL, `has_reactions` INTEGER NOT NULL, `big_emoji` INTEGER NOT NULL, `was_delivered_quietly` INTEGER NOT NULL, `did_notify_recipient` INTEGER NOT NULL, `is_bookmarked` INTEGER NOT NULL, `is_pinned` INTEGER NOT NULL DEFAULT 0, `has_dd_results` INTEGER NOT NULL, `message_source` TEXT NOT NULL, `sms_id` INTEGER, `sms_thread_id` INTEGER, `sms_status` TEXT, `sim_slot` INTEGER, `sms_error_message` TEXT, `metadata` TEXT, `is_reaction` INTEGER NOT NULL DEFAULT 0, `split_batch_id` TEXT, `is_link_embed` INTEGER NOT NULL DEFAULT 0, `link_embed_url` TEXT, FOREIGN KEY(`chat_guid`) REFERENCES `chats`(`guid`) ON UPDATE NO ACTION ON DELETE CASCADE )",
         "fields": [
           {
             "fieldPath": "id",
@@ -313,6 +313,13 @@
             "columnName": "is_bookmarked",
             "affinity": "INTEGER",
             "notNull": true
+          },
+          {
+            "fieldPath": "isPinned",
+            "columnName": "is_pinned",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
           },
           {
             "fieldPath": "hasDdResults",
@@ -543,6 +550,26 @@
             ],
             "orders": [],
             "createSql": "CREATE INDEX IF NOT EXISTS `index_messages_is_link_embed` ON `${TABLE_NAME}` (`is_link_embed`)"
+          },
+          {
+            "name": "index_messages_chat_guid_is_pinned",
+            "unique": false,
+            "columnNames": [
+              "chat_guid",
+              "is_pinned"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_messages_chat_guid_is_pinned` ON `${TABLE_NAME}` (`chat_guid`, `is_pinned`)"
+          },
+          {
+            "name": "index_messages_chat_guid_is_bookmarked",
+            "unique": false,
+            "columnNames": [
+              "chat_guid",
+              "is_bookmarked"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_messages_chat_guid_is_bookmarked` ON `${TABLE_NAME}` (`chat_guid`, `is_bookmarked`)"
           }
         ],
         "foreignKeys": [
@@ -2945,7 +2972,7 @@
     "views": [],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '54050681f9b7ffb27796a154d8624bb7')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '7adac4c644ef4856dfff5fe0151c8551')"
     ]
   }
 }

@@ -1879,6 +1879,33 @@ object DatabaseMigrations {
     }
 
     /**
+     * Migration 63→64: Add is_pinned column and indexes for pinned/starred messages.
+     *
+     * This migration adds support for message pinning and improves starred message queries:
+     * - is_pinned column: Allows pinning important messages to the top of a conversation
+     * - Composite indexes on (chat_guid, is_pinned) and (chat_guid, is_bookmarked) for
+     *   efficient per-conversation queries of pinned and starred messages
+     *
+     * Note: is_bookmarked already exists and is repurposed as the "starred" feature.
+     */
+    val MIGRATION_63_64 = object : Migration(63, 64) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            Timber.i("Starting migration 63→64: Add is_pinned column and pinned/starred indexes")
+
+            // Add is_pinned column with default false
+            db.execSQL("ALTER TABLE messages ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0")
+
+            // Create composite index for efficient pinned message queries per chat
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_messages_chat_guid_is_pinned ON messages(chat_guid, is_pinned)")
+
+            // Create composite index for efficient starred message queries per chat
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_messages_chat_guid_is_bookmarked ON messages(chat_guid, is_bookmarked)")
+
+            Timber.i("Migration 63→64 complete: Added is_pinned column and pinned/starred indexes")
+        }
+    }
+
+    /**
      * List of all migrations for use with databaseBuilder.
      *
      * IMPORTANT: Always add new migrations to this array!
@@ -1946,6 +1973,7 @@ object DatabaseMigrations {
         MIGRATION_59_60,
         MIGRATION_60_61,
         MIGRATION_61_62,
-        MIGRATION_62_63
+        MIGRATION_62_63,
+        MIGRATION_63_64
     )
 }

@@ -6,6 +6,7 @@ import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.displayName
 import com.bothbubbles.data.repository.HandleRepository
+import com.bothbubbles.services.contacts.DisplayNameResolver
 import com.bothbubbles.util.parsing.HtmlEntityDecoder
 import com.bothbubbles.util.parsing.UrlParsingUtils
 import java.time.Instant
@@ -223,24 +224,15 @@ fun formatRelativeTime(timestamp: Long, application: Application): String {
     return messageDateTime.format(formatter)
 }
 
+// Centralized resolver instance for first name extraction
+private val displayNameResolver = DisplayNameResolver()
+
 /**
  * Extract the first name from a full name, excluding emojis and non-letter characters.
- * If the name starts with emojis, finds the first word that contains letters.
- * If the input is a phone number (no letters), returns the full input unchanged.
+ * Delegates to centralized DisplayNameResolver for consistency across the app.
  */
 fun extractFirstName(fullName: String): String {
-    // Split by whitespace and find the first word that has letters
-    val words = fullName.trim().split(Regex("\\s+"))
-    for (word in words) {
-        // Filter to only letters/digits
-        val cleaned = word.filter { it.isLetterOrDigit() }
-        // Check if it has at least one letter (not just digits/emojis)
-        if (cleaned.isNotEmpty() && cleaned.any { it.isLetter() }) {
-            return cleaned
-        }
-    }
-    // No letters found - this is likely a phone number, return as-is
-    return fullName
+    return displayNameResolver.extractFirstName(fullName)
 }
 
 /**

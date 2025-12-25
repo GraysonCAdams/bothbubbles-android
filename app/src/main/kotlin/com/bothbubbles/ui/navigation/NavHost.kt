@@ -52,19 +52,29 @@ data class NotificationDeepLinkData(
     val mergedGuids: String? = null
 )
 
+/**
+ * Enum for shortcut navigation targets
+ */
+enum class ShortcutNavigation {
+    COMPOSE
+}
+
 @Composable
 fun BothBubblesNavHost(
     navController: NavHostController = rememberNavController(),
     isSetupComplete: Boolean = true,
     shareIntentData: ShareIntentData? = null,
     stateRestorationData: StateRestorationData? = null,
-    notificationDeepLinkData: NotificationDeepLinkData? = null
+    notificationDeepLinkData: NotificationDeepLinkData? = null,
+    shortcutNavigation: ShortcutNavigation? = null
 ) {
     // Determine start destination based on setup status and share intent
     // Note: For direct share (with directShareChatGuid), we start at Conversations
     // and navigate to Chat via LaunchedEffect so back button works
     val startDestination: Screen = when {
         !isSetupComplete -> Screen.Setup()
+        // Launcher shortcut navigation (e.g., "New Message" from long-press menu)
+        shortcutNavigation == ShortcutNavigation.COMPOSE -> Screen.Compose()
         // Voice command intent with recipient (Google Assistant, Android Auto)
         shareIntentData?.recipientAddress != null -> Screen.Compose(
             sharedText = shareIntentData.sharedText,

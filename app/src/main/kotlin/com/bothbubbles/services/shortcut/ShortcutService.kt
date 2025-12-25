@@ -14,6 +14,7 @@ import com.bothbubbles.data.local.db.dao.ChatParticipantDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.data.local.db.entity.displayName
+import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.util.GroupAvatarRenderer
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.core.model.entity.UnifiedChatEntity
@@ -54,6 +55,7 @@ class ShortcutService @Inject constructor(
     private val chatDao: ChatDao,
     private val chatParticipantDao: ChatParticipantDao,
     private val handleDao: HandleDao,
+    private val chatRepository: ChatRepository,
     @ApplicationScope private val applicationScope: CoroutineScope,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
@@ -191,9 +193,9 @@ class ShortcutService @Inject constructor(
             val avatarPath = chat.effectiveAvatarPath ?: handle?.cachedAvatarPath
 
             // Display name priority: handle's resolved name > chat displayName > formatted address
-            // handle.displayName uses: cachedDisplayName > "Maybe: inferred" > formattedAddress > formatted raw
+            // This matches ChatRepository.resolveChatTitle for consistency
             val displayName = handle?.displayName
-                ?: chat.displayName
+                ?: chat.displayName?.takeIf { it.isNotBlank() }
                 ?: PhoneNumberFormatter.format(chat.normalizedAddress)
 
             Timber.tag(TAG).d(
@@ -236,16 +238,12 @@ class ShortcutService @Inject constructor(
         for (chat in groupChats) {
             // Get participants for this group chat (for collage avatar and display name)
             val participants = allParticipants[chat.guid] ?: emptyList()
-            val participantNames = participants.map { it.handle.displayName }
+            val handles = participants.map { it.handle }
 
-            // Display name priority: explicit group name > participant names > "Group"
-            // Never fall back to chatIdentifier as it's a raw GUID like "iMessage;+1;chat123"
-            val displayName = chat.displayName?.takeIf { it.isNotBlank() }
-                ?: participantNames.take(3).joinToString(", ")
-                    .let { names -> if (participants.size > 3) "$names +${participants.size - 3}" else names }
-                    .takeIf { it.isNotBlank() }
-                ?: "Group"
-            val participantAvatarPaths = participants.map { it.handle.cachedAvatarPath }
+            // Use ChatRepository's standard title resolution for consistency
+            val displayName = chatRepository.resolveChatTitle(chat, handles)
+            val participantNames = handles.map { it.displayName }
+            val participantAvatarPaths = handles.map { it.cachedAvatarPath }
 
             // Get avatar from unified chat
             val unifiedChat = chat.unifiedChatId?.let { unifiedChatsMap[it] }

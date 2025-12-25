@@ -436,6 +436,7 @@ internal fun SegmentedMessageBubble(
                                 name = message.senderName ?: "?",
                                 avatarPath = message.senderAvatarPath,
                                 size = avatarSize,
+                                hasContactInfo = message.senderHasContactInfo,
                                 modifier = Modifier
                                     .padding(end = 8.dp, bottom = linkPreviewSubtextOffset)
                                     .then(

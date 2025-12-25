@@ -152,6 +152,7 @@ class LinksViewModel @Inject constructor(
         }
 
         val senderAvatarPath = if (message.isFromMe) null else handle?.cachedAvatarPath
+        val senderHasContactInfo = message.isFromMe || handle?.cachedDisplayName != null
 
         val timestamp = dateFormat.format(Date(message.dateCreated))
 
@@ -163,6 +164,7 @@ class LinksViewModel @Inject constructor(
                 domain = detected.domain,
                 senderName = senderName,
                 senderAvatarPath = senderAvatarPath,
+                senderHasContactInfo = senderHasContactInfo,
                 timestamp = timestamp,
                 thumbnailUrl = null
             )

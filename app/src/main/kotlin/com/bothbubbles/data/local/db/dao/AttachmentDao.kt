@@ -25,7 +25,8 @@ data class MediaWithSender(
     @androidx.room.ColumnInfo(name = "sender_address") val senderAddress: String?,
     @androidx.room.ColumnInfo(name = "date_created") val dateCreated: Long,
     // Handle info (nullable for "from me" messages or if handle not found)
-    @androidx.room.ColumnInfo(name = "cached_display_name") val displayName: String?,
+    @androidx.room.ColumnInfo(name = "cached_display_name") val cachedDisplayName: String?,
+    @androidx.room.ColumnInfo(name = "inferred_name") val inferredName: String?,
     @androidx.room.ColumnInfo(name = "cached_avatar_path") val avatarPath: String?,
     @androidx.room.ColumnInfo(name = "formatted_address") val formattedAddress: String?
 )
@@ -93,7 +94,8 @@ interface AttachmentDao {
         @androidx.room.ColumnInfo(name = "is_from_me") val isFromMe: Boolean,
         @androidx.room.ColumnInfo(name = "sender_address") val senderAddress: String?,
         @androidx.room.ColumnInfo(name = "date_created") val dateCreated: Long,
-        @androidx.room.ColumnInfo(name = "cached_display_name") val displayName: String?,
+        @androidx.room.ColumnInfo(name = "cached_display_name") val cachedDisplayName: String?,
+        @androidx.room.ColumnInfo(name = "inferred_name") val inferredName: String?,
         @androidx.room.ColumnInfo(name = "cached_avatar_path") val avatarPath: String?,
         @androidx.room.ColumnInfo(name = "formatted_address") val formattedAddress: String?
     )
@@ -114,6 +116,7 @@ interface AttachmentDao {
             m.sender_address,
             m.date_created,
             h.cached_display_name,
+            h.inferred_name,
             h.cached_avatar_path,
             h.formatted_address
         FROM attachments a
@@ -180,6 +183,7 @@ interface AttachmentDao {
             m.sender_address,
             m.date_created,
             h.cached_display_name,
+            h.inferred_name,
             h.cached_avatar_path,
             h.formatted_address
         FROM attachments a

@@ -40,6 +40,7 @@ data class LinkItem(
     val domain: String,
     val senderName: String,
     val senderAvatarPath: String?,
+    val senderHasContactInfo: Boolean = false,
     val timestamp: String,
     val thumbnailUrl: String? = null
 )
@@ -292,7 +293,8 @@ private fun LinkCard(
                     Avatar(
                         name = link.senderName,
                         avatarPath = link.senderAvatarPath,
-                        size = 16.dp
+                        size = 16.dp,
+                        hasContactInfo = link.senderHasContactInfo
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(

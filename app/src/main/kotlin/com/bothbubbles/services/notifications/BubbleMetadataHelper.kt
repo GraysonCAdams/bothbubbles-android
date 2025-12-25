@@ -42,6 +42,11 @@ class BubbleMetadataHelper @Inject constructor(
     @Volatile
     private var cachedSelectedBubbleChats: Set<String> = emptySet()
 
+    // Track shortcuts created this session to avoid redundant creation
+    // Shortcuts are still needed for share targets even with bubbles disabled
+    private val createdShortcuts = mutableSetOf<String>()
+    private val shortcutLock = Any()
+
     init {
         // Initialize cached values in background
         applicationScope.launch(ioDispatcher) {
@@ -71,7 +76,9 @@ class BubbleMetadataHelper @Inject constructor(
      * @param participantNames List of participant names for group collage (optional)
      * @param chatAvatarPath Custom group photo path (takes precedence over collage)
      * @param senderAvatarPath Avatar path for 1:1 chat sender (contact photo URI)
+     * @param senderHasContactInfo Whether the sender has saved contact info (prevents false business detection)
      * @param participantAvatarPaths Avatar paths for group participants (corresponding to participantNames)
+     * @param participantHasContactInfo List of booleans indicating if each participant has saved contact info
      * @return The shortcut ID
      */
     fun createConversationShortcut(
@@ -81,9 +88,18 @@ class BubbleMetadataHelper @Inject constructor(
         participantNames: List<String> = emptyList(),
         chatAvatarPath: String? = null,
         senderAvatarPath: String? = null,
-        participantAvatarPaths: List<String?> = emptyList()
+        senderHasContactInfo: Boolean = false,
+        participantAvatarPaths: List<String?> = emptyList(),
+        participantHasContactInfo: List<Boolean> = emptyList()
     ): String {
         val shortcutId = "chat_$chatGuid"
+
+        // Skip if shortcut was already created this session (lazy creation)
+        synchronized(shortcutLock) {
+            if (shortcutId in createdShortcuts) {
+                return shortcutId
+            }
+        }
 
         // Create intent for the shortcut
         val intent = Intent(context, MainActivity::class.java).apply {
@@ -103,7 +119,13 @@ class BubbleMetadataHelper @Inject constructor(
                     if (isGroup && participantNames.size > 1) {
                         AvatarGenerator.generateGroupAdaptiveIconCompatWithPhotos(context, participantNames, participantAvatarPaths, 128)
                     } else {
-                        AvatarGenerator.generateAdaptiveIconCompat(context, chatTitle, 128)
+                        // Use hasContactInfo to prevent false business icon detection
+                        val hasContactInfo = if (isGroup) {
+                            participantHasContactInfo.firstOrNull() ?: false
+                        } else {
+                            senderHasContactInfo
+                        }
+                        AvatarGenerator.generateAdaptiveIconCompat(context, chatTitle, 128, hasContactInfo)
                     }
                 }
             }
@@ -117,12 +139,18 @@ class BubbleMetadataHelper @Inject constructor(
                 if (photoBitmap != null) {
                     IconCompat.createWithAdaptiveBitmap(photoBitmap)
                 } else {
-                    AvatarGenerator.generateAdaptiveIconCompat(context, chatTitle, 128)
+                    // Pass senderHasContactInfo to prevent false business icon detection
+                    AvatarGenerator.generateAdaptiveIconCompat(context, chatTitle, 128, senderHasContactInfo)
                 }
             }
-            // Fallback to generated avatar
+            // Fallback to generated avatar with proper hasContactInfo
             else -> {
-                AvatarGenerator.generateAdaptiveIconCompat(context, chatTitle, 128)
+                val hasContactInfo = if (isGroup) {
+                    participantHasContactInfo.firstOrNull() ?: false
+                } else {
+                    senderHasContactInfo
+                }
+                AvatarGenerator.generateAdaptiveIconCompat(context, chatTitle, 128, hasContactInfo)
             }
         }
 
@@ -149,6 +177,11 @@ class BubbleMetadataHelper @Inject constructor(
 
         // Push the shortcut
         ShortcutManagerCompat.pushDynamicShortcut(context, shortcut)
+
+        // Mark as created to avoid redundant creation this session
+        synchronized(shortcutLock) {
+            createdShortcuts.add(shortcutId)
+        }
 
         return shortcutId
     }
