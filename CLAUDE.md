@@ -688,6 +688,13 @@ The app uses multiple layers to ensure messages are never missed, as BlueBubbles
 - Run lint/tests when making significant changes
 - Prefer editing existing files over creating new ones
 
+### Troubleshooting Rules (MANDATORY)
+
+**RULE**: NEVER clear logs (logcat, ACRA reports, crash buffers, or any diagnostic data) without explicit user approval. Logs are critical for diagnosing issues and clearing them prematurely destroys valuable debugging information. Always ask the user before running commands like:
+- `adb logcat -c` (clears logcat buffer)
+- Deleting ACRA crash report files
+- Any command that removes or truncates log files
+
 ## Debugging Crashes via ADB
 
 When the app crashes, use the following process to retrieve the crash report:

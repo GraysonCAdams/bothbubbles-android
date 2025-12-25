@@ -166,8 +166,9 @@ fun ConversationDetailsScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.alpha(headerScrollProgress)
                     ) {
+                        // Priority: UnifiedChatEntity avatar > ChatEntity serverGroupPhotoPath (fallback for group chats)
                         val avatarPath = if (uiState.chat?.isGroup == true) {
-                            uiState.unifiedChat?.effectiveAvatarPath
+                            uiState.unifiedChat?.effectiveAvatarPath ?: uiState.chat?.serverGroupPhotoPath
                         } else {
                             uiState.participants.firstOrNull()?.cachedAvatarPath
                         }
@@ -233,8 +234,9 @@ fun ConversationDetailsScreen(
             ) {
                 // Large centered header (fades out as it scrolls, app bar title fades in)
                 item {
+                    // Priority: UnifiedChatEntity avatar > ChatEntity serverGroupPhotoPath (fallback for group chats)
                     val headerAvatarPath = if (uiState.chat?.isGroup == true) {
-                        uiState.unifiedChat?.effectiveAvatarPath
+                        uiState.unifiedChat?.effectiveAvatarPath ?: uiState.chat?.serverGroupPhotoPath
                     } else {
                         uiState.participants.firstOrNull()?.cachedAvatarPath
                     }

@@ -4,6 +4,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Check
@@ -109,17 +110,23 @@ fun CalendarPickerDialog(
                     }
                 }
                 else -> {
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 400.dp)
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        items(calendars) { calendar ->
-                            CalendarListItem(
-                                calendar = calendar,
-                                isSelected = calendar.id == currentCalendarId,
-                                onClick = { onCalendarSelected(calendar) }
-                            )
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 400.dp)
+                        ) {
+                            items(calendars) { calendar ->
+                                CalendarListItem(
+                                    calendar = calendar,
+                                    isSelected = calendar.id == currentCalendarId,
+                                    onClick = { onCalendarSelected(calendar) }
+                                )
+                            }
                         }
                     }
                 }
@@ -163,6 +170,9 @@ private fun CalendarListItem(
                 )
             }
         } else null,
+        colors = ListItemDefaults.colors(
+            containerColor = Color.Transparent
+        ),
         modifier = modifier.clickable(onClick = onClick)
     )
 }

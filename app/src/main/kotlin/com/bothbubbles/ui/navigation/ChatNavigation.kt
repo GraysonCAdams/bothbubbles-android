@@ -32,6 +32,13 @@ fun NavGraphBuilder.chatNavigation(navController: NavHostController) {
     // Individual chat
     composable<Screen.Chat> { backStackEntry ->
         val route: Screen.Chat = backStackEntry.toRoute()
+        val context = LocalContext.current
+
+        // Detect if this was opened from a direct share intent (external app sharing)
+        // Direct share uses route params; in-app share picker uses savedStateHandle
+        val isFromDirectShare = remember(route) {
+            route.sharedText != null || route.sharedUris.isNotEmpty()
+        }
 
         // Handle captured photo from camera screen
         val capturedPhotoUri = backStackEntry.savedStateHandle
@@ -110,6 +117,12 @@ fun NavGraphBuilder.chatNavigation(navController: NavHostController) {
                 backStackEntry.savedStateHandle.remove<String>(NavigationKeys.SHARED_TEXT)
                 backStackEntry.savedStateHandle.remove<ArrayList<String>>(NavigationKeys.SHARED_URIS)
             },
+            // Direct share support - finish activity after sending message from share intent
+            isFromDirectShare = isFromDirectShare,
+            onDirectShareCompleted = {
+                Timber.d("ChatNavigation: Message sent from direct share, finishing activity")
+                (context as? android.app.Activity)?.finish()
+            },
             activateSearch = activateSearch.value,
             onSearchActivated = {
                 backStackEntry.savedStateHandle[NavigationKeys.ACTIVATE_SEARCH] = false
@@ -145,7 +158,12 @@ fun NavGraphBuilder.chatNavigation(navController: NavHostController) {
         val route: Screen.Compose = backStackEntry.toRoute()
         val context = LocalContext.current
 
-        Timber.d("ChatNavigation: Screen.Compose route - sharedText='${route.sharedText}', sharedUris=${route.sharedUris.size}, initialAddress=${route.initialAddress}")
+        // Detect if this was opened from a share intent (external app sharing)
+        val isFromShareIntent = remember(route) {
+            route.sharedText != null || route.sharedUris.isNotEmpty() || route.initialAddress != null
+        }
+
+        Timber.d("ChatNavigation: Screen.Compose route - sharedText='${route.sharedText}', sharedUris=${route.sharedUris.size}, initialAddress=${route.initialAddress}, isFromShareIntent=$isFromShareIntent")
 
         ComposeScreen(
             onNavigateBack = {
@@ -156,11 +174,18 @@ fun NavGraphBuilder.chatNavigation(navController: NavHostController) {
                 }
             },
             onNavigateToChat = { chatGuid, mergedGuids ->
-                val mergedGuidsStr = if (mergedGuids != null && mergedGuids.size > 1) {
-                    mergedGuids.joinToString(",")
-                } else null
-                navController.navigate(Screen.Chat(chatGuid, mergedGuidsStr)) {
-                    popUpTo(Screen.Conversations) { inclusive = false }
+                if (isFromShareIntent) {
+                    // Message sent from share intent - finish activity to return to origin app
+                    Timber.d("ChatNavigation: Message sent from share intent, finishing activity")
+                    (context as? android.app.Activity)?.finish()
+                } else {
+                    // Normal in-app compose - navigate to chat
+                    val mergedGuidsStr = if (mergedGuids != null && mergedGuids.size > 1) {
+                        mergedGuids.joinToString(",")
+                    } else null
+                    navController.navigate(Screen.Chat(chatGuid, mergedGuidsStr)) {
+                        popUpTo(Screen.Conversations) { inclusive = false }
+                    }
                 }
             },
             sharedText = route.sharedText,

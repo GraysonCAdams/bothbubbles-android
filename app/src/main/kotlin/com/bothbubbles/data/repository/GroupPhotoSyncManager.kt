@@ -107,6 +107,14 @@ class GroupPhotoSyncManager @Inject constructor(
         return try {
             val localPath = downloadGroupPhoto(chatGuid, serverGroupPhotoGuid)
             chatDao.updateServerGroupPhoto(chatGuid, localPath, serverGroupPhotoGuid)
+
+            // Also sync to UnifiedChatEntity if linked (ensures consistency across all consumers)
+            val chat = chatDao.getChatByGuid(chatGuid)
+            chat?.unifiedChatId?.let { unifiedChatId ->
+                unifiedChatDao.updateServerGroupPhoto(unifiedChatId, localPath, serverGroupPhotoGuid)
+                Timber.tag(TAG).d("Also synced group photo to unified chat $unifiedChatId")
+            }
+
             Timber.tag(TAG).i("Downloaded group photo for chat $chatGuid")
             true
         } catch (e: Exception) {
@@ -206,7 +214,8 @@ class GroupPhotoSyncManager @Inject constructor(
     }
 
     /**
-     * Clear the group photo for a group chat (stores on ChatEntity).
+     * Clear the group photo for a group chat.
+     * Clears from both ChatEntity and linked UnifiedChatEntity for consistency.
      */
     private suspend fun clearGroupChatPhoto(chatGuid: String, photoPath: String?) {
         // Delete the local file if it exists
@@ -218,8 +227,14 @@ class GroupPhotoSyncManager @Inject constructor(
             }
         }
 
-        // Clear the database fields
+        // Clear the database fields on ChatEntity
         chatDao.updateServerGroupPhoto(chatGuid, null, null)
+
+        // Also clear on UnifiedChatEntity if linked (ensures consistency)
+        val chat = chatDao.getChatByGuid(chatGuid)
+        chat?.unifiedChatId?.let { unifiedChatId ->
+            unifiedChatDao.updateServerGroupPhoto(unifiedChatId, null, null)
+        }
     }
 
     /**

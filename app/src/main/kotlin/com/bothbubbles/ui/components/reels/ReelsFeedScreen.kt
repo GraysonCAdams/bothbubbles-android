@@ -138,7 +138,7 @@ fun ReelsFeedScreen(
     initialIndex: Int = 0,
     initialUnwatchedOnly: Boolean = false,
     onClose: () -> Unit,
-    onTapback: (messageGuid: String, url: String, tapback: ReelsTapback) -> Unit,
+    onTapback: (messageGuid: String, url: String, tapback: ReelsTapback?) -> Unit,
     onVideoViewed: (originalUrl: String) -> Unit = {},
     onStartDownload: (originalUrl: String) -> Unit = {},
     onReplyClick: (messageGuid: String) -> Unit = {},
@@ -482,7 +482,7 @@ private fun ReelPage(
     uiAlpha: Float,
     onHoldStart: () -> Unit,
     onHoldEnd: () -> Unit,
-    onTapback: (ReelsTapback) -> Unit,
+    onTapback: (ReelsTapback?) -> Unit,
     onOpenInBrowser: () -> Unit,
     onShare: () -> Unit,
     onReplyClick: () -> Unit
@@ -1236,9 +1236,23 @@ private fun SenderInfoBadge(
     // Use display name or address for avatar
     val displayName = senderName ?: senderAddress ?: "Unknown"
 
+    // Convert currentTapback to ReactionUiModel and combine with other reactions
+    val allReactions = remember(reactions, currentTapback) {
+        if (currentTapback != null) {
+            val myReaction = ReactionUiModel(
+                tapback = currentTapback.toTapback(),
+                isFromMe = true,
+                senderName = "You"
+            )
+            reactions + myReaction
+        } else {
+            reactions
+        }
+    }
+
     // Group reactions by type for inline display
-    val groupedReactions = remember(reactions) {
-        reactions.groupBy { it.tapback }
+    val groupedReactions = remember(allReactions) {
+        allReactions.groupBy { it.tapback }
             .filter { it.value.isNotEmpty() }
     }
 
@@ -1290,16 +1304,6 @@ private fun SenderInfoBadge(
                             text = formatRelativeTime(timestamp),
                             style = MaterialTheme.typography.bodySmall,
                             color = Color.White.copy(alpha = 0.7f)
-                        )
-                    }
-
-                    // Current tapback if any
-                    if (currentTapback != null) {
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "${currentTapback.emoji} ${currentTapback.label}",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = Color.White
                         )
                     }
                 }
@@ -1372,11 +1376,27 @@ private fun SenderInfoBadge(
                                 if (index > 0) {
                                     Spacer(modifier = Modifier.width(4.dp))
                                 }
-                                Text(
-                                    text = "${tapback.emoji}${reactionsList.size}",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = Color.White
-                                )
+                                val hasMyReaction = reactionsList.any { it.isFromMe }
+                                // Blue badge for reactions I've made
+                                if (hasMyReaction) {
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = MaterialTheme.colorScheme.primary
+                                    ) {
+                                        Text(
+                                            text = "${tapback.emoji}${reactionsList.size}",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = Color.White,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                } else {
+                                    Text(
+                                        text = "${tapback.emoji}${reactionsList.size}",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = Color.White
+                                    )
+                                }
                             }
                         }
                     }
@@ -1389,9 +1409,18 @@ private fun SenderInfoBadge(
 @Composable
 private fun TapbackSelector(
     currentTapback: ReelsTapback?,
-    onTapbackSelected: (ReelsTapback) -> Unit,
+    onTapbackSelected: (ReelsTapback?) -> Unit,
     onDismiss: () -> Unit
 ) {
+    // Helper to handle tap - if already selected, remove (null), otherwise select
+    fun handleTapback(tapback: ReelsTapback) {
+        if (currentTapback == tapback) {
+            onTapbackSelected(null) // De-select / remove
+        } else {
+            onTapbackSelected(tapback) // Select new
+        }
+    }
+
     // Click outside to dismiss
     Box(
         modifier = Modifier
@@ -1428,12 +1457,12 @@ private fun TapbackSelector(
                         TapbackButton(
                             tapback = ReelsTapback.LIKE,
                             isSelected = currentTapback == ReelsTapback.LIKE,
-                            onClick = { onTapbackSelected(ReelsTapback.LIKE) }
+                            onClick = { handleTapback(ReelsTapback.LIKE) }
                         )
                         TapbackButton(
                             tapback = ReelsTapback.LAUGH,
                             isSelected = currentTapback == ReelsTapback.LAUGH,
-                            onClick = { onTapbackSelected(ReelsTapback.LAUGH) }
+                            onClick = { handleTapback(ReelsTapback.LAUGH) }
                         )
                     }
 
@@ -1444,12 +1473,12 @@ private fun TapbackSelector(
                         TapbackButton(
                             tapback = ReelsTapback.LOVE,
                             isSelected = currentTapback == ReelsTapback.LOVE,
-                            onClick = { onTapbackSelected(ReelsTapback.LOVE) }
+                            onClick = { handleTapback(ReelsTapback.LOVE) }
                         )
                         TapbackButton(
                             tapback = ReelsTapback.DISLIKE,
                             isSelected = currentTapback == ReelsTapback.DISLIKE,
-                            onClick = { onTapbackSelected(ReelsTapback.DISLIKE) }
+                            onClick = { handleTapback(ReelsTapback.DISLIKE) }
                         )
                     }
                 }

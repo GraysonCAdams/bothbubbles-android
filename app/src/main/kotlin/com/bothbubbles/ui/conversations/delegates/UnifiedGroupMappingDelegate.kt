@@ -110,14 +110,19 @@ class UnifiedGroupMappingDelegate @AssistedInject constructor(
         val address = primaryParticipant?.address ?: primaryChat.chatIdentifier ?: unifiedChat.normalizedAddress
 
         // Determine display name using unified chat's cached values
-        // For group chats, prioritize chat display name over participant names
+        // Priority: explicit group name > participant names > formatted identifier
         val displayName: String = unifiedChat.displayName?.takeIf { it.isNotBlank() }
             ?: primaryChat.displayName?.takeIf { it.isNotBlank() }
-            ?: (if (!unifiedChat.isGroup) {
-                // Only use participant name for 1:1 chats
+            ?: if (isGroup) {
+                // For group chats: join participant names (up to 3, then "+N more")
+                groupParticipants.take(3).joinToString(", ") { it.displayName }
+                    .let { names -> if (groupParticipants.size > 3) "$names +${groupParticipants.size - 3}" else names }
+                    .takeIf { it.isNotBlank() }
+            } else {
+                // For 1:1 chats: use participant name with inferred fallback
                 primaryParticipant?.cachedDisplayName?.takeIf { it.isNotBlank() }
                     ?: primaryParticipant?.inferredName?.let { "Maybe: $it" }
-            } else null)
+            }
             ?: primaryChat.chatIdentifier?.let { PhoneNumberFormatter.format(it) }
             ?: PhoneNumberFormatter.format(address)
 

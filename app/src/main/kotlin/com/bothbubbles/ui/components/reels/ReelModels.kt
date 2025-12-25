@@ -5,6 +5,7 @@ import com.bothbubbles.services.socialmedia.CachedVideo
 import com.bothbubbles.services.socialmedia.DownloadProgress
 import com.bothbubbles.services.socialmedia.SocialMediaPlatform
 import com.bothbubbles.ui.components.message.ReactionUiModel
+import com.bothbubbles.ui.components.message.Tapback
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -15,7 +16,15 @@ enum class ReelsTapback(val emoji: String, val label: String, val reactionType: 
     LIKE("👍", "Like", "like"),
     LAUGH("😂", "Laugh", "laugh"),
     LOVE("❤️", "Love", "love"),
-    DISLIKE("👎", "Dislike", "dislike")
+    DISLIKE("👎", "Dislike", "dislike");
+
+    /** Convert to the standard Tapback type for UI display */
+    fun toTapback(): Tapback = when (this) {
+        LIKE -> Tapback.LIKE
+        LAUGH -> Tapback.LAUGH
+        LOVE -> Tapback.LOVE
+        DISLIKE -> Tapback.DISLIKE
+    }
 }
 
 /**

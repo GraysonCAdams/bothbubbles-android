@@ -1,5 +1,6 @@
 package com.bothbubbles.ui.chat
 
+import android.text.format.DateFormat
 import timber.log.Timber
 import com.bothbubbles.BuildConfig
 import androidx.compose.animation.animateContentSize
@@ -53,6 +54,7 @@ import com.bothbubbles.ui.chat.delegates.CursorChatMessageListDelegate
 import com.bothbubbles.ui.components.message.CalendarEventIndicator
 import com.bothbubbles.ui.components.message.CalendarEventItem
 import com.bothbubbles.ui.components.message.ChatListItem
+import com.bothbubbles.ui.components.message.formatMessageTime
 import com.bothbubbles.util.error.AppError
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -267,6 +269,7 @@ fun ChatMessageList(
     val isLoadingMore by messageListDelegate.isLoadingFromServer.collectAsStateWithLifecycle()
 
     val context = LocalContext.current
+    val is24Hour = DateFormat.is24HourFormat(context)
     val hapticFeedback = LocalHapticFeedback.current
     val listState = chatScreenState.listState
     val scrollScope = rememberCoroutineScope()
@@ -619,8 +622,9 @@ fun ChatMessageList(
                         ) { _, item ->
                             when (item) {
                                 is ChatListItem.CalendarEvent -> {
+                                    val formattedTime = formatMessageTime(item.event.eventStartTime, is24Hour)
                                     CalendarEventIndicator(
-                                        text = item.event.getDisplayText()
+                                        text = item.event.getDisplayText(formattedTime)
                                     )
                                 }
                                 is ChatListItem.Message -> {

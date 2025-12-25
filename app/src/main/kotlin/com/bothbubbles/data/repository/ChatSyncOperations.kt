@@ -196,9 +196,11 @@ class ChatSyncOperations @Inject constructor(
 
     private fun ChatDto.toEntity(unifiedChatId: String?): ChatEntity {
         // Clean the displayName: strip service suffixes and validate
+        // Also reject if displayName equals chatIdentifier (server sending ID as name)
         val cleanedDisplayName = displayName
             ?.let { com.bothbubbles.util.PhoneNumberFormatter.stripServiceSuffix(it) }
             ?.takeIf { it.isValidDisplayName() }
+            ?.takeIf { it != chatIdentifier }  // Reject if server sent chatIdentifier as displayName
 
         return ChatEntity(
             guid = guid,
@@ -236,9 +238,8 @@ internal fun String.isValidDisplayName(): Boolean {
     if (Regex("\\((sms|ft)[a-z_]*\\)$", RegexOption.IGNORE_CASE).containsMatchIn(this)) return false
 
     // Filter out short alphanumeric strings that look like internal IDs (e.g., "c46271", "8a5f87", "930d51")
-    // These can start with either a letter or digit. Valid display names are typically longer
-    // and contain more than just alphanumerics
-    if (Regex("^[a-z0-9]{5,8}$", RegexOption.IGNORE_CASE).matches(this)) return false
+    // Must contain at least one digit to be considered an ID - this preserves names like "Siblings", "Friends"
+    if (Regex("^(?=.*[0-9])[a-z0-9]{5,8}$", RegexOption.IGNORE_CASE).matches(this)) return false
 
     return true
 }

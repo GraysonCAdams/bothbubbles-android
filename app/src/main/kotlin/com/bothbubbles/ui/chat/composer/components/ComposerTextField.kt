@@ -97,9 +97,6 @@ fun ComposerTextField(
     // Track line count to force height updates when text wraps
     var lineCount by remember { mutableIntStateOf(1) }
 
-    // Debug: Log incoming text prop
-    Timber.d("ComposerTextField composed with text='$text'")
-
     // Placeholder text based on send mode and enabled state
     val placeholderText = when {
         !isEnabled -> "Not default SMS app"
@@ -128,18 +125,34 @@ fun ComposerTextField(
         }
     }
 
-    // Sync external text changes (e.g., when mention is inserted)
+    // Sync external text changes (e.g., when mention is inserted, draft restored)
+    // This is the ONLY place that syncs external text to the EditText to avoid race conditions.
     LaunchedEffect(text) {
-        Timber.d("ComposerTextField: LaunchedEffect(text) - text='$text', editTextRef=${editTextRef != null}")
         editTextRef?.let { editText ->
             val currentText = editText.text.toString()
-            Timber.d("ComposerTextField: currentText='$currentText', needsSync=${currentText != text}")
-            if (currentText != text) {
-                // Preserve selection position or move to end
-                val wasAtEnd = editText.selectionEnd == editText.text.length
+
+            // IMPORTANT: Only sync if the external text is genuinely different AND
+            // not a substring of what the user has typed (which would indicate we're
+            // behind due to rapid typing). This prevents losing characters.
+            val needsSync = currentText != text && !currentText.startsWith(text)
+
+            if (needsSync) {
+                Timber.d("ComposerTextField: syncing external text change, current='$currentText', new='$text'")
+                // Capture cursor info BEFORE modifying text
+                val cursorWasAtEnd = editText.selectionEnd >= editText.text.length
+                val savedCursorPos = editText.selectionStart
+
                 editText.setText(applyMentionSpans(text, mentions, mentionColor))
-                editText.setSelection(if (wasAtEnd) text.length else minOf(editText.selectionEnd, text.length))
-                Timber.d("ComposerTextField: synced text to EditText")
+
+                // Restore cursor position intelligently:
+                // - If cursor was at end, keep it at end
+                // - Otherwise, try to preserve the saved position (clamped to new length)
+                val newCursorPos = when {
+                    cursorWasAtEnd -> text.length
+                    savedCursorPos <= text.length -> savedCursorPos
+                    else -> text.length
+                }
+                editText.setSelection(newCursorPos)
             }
         }
     }
@@ -228,13 +241,10 @@ fun ComposerTextField(
                     editText.setTextColor(textColor)
                     editText.setHintTextColor(if (isEnabled) hintColor else (hintColor and 0x00FFFFFF) or 0x80000000.toInt())
 
-                    // Sync text if changed externally (only if different to avoid cursor jump)
-                    val currentText = editText.text.toString()
-                    if (currentText != text) {
-                        val cursorPos = editText.selectionStart.coerceIn(0, text.length)
-                        editText.setText(applyMentionSpans(text, mentions, mentionColor))
-                        editText.setSelection(cursorPos)
-                    }
+                    // NOTE: Text sync is handled ONLY by LaunchedEffect(text) to avoid
+                    // race conditions during fast typing. Having two sync points causes
+                    // characters to be lost when typing quickly during line wraps.
+                    // See LaunchedEffect(text) block above for the single sync point.
                 }
             )
 

@@ -20,6 +20,8 @@ import java.util.Locale
 
 /**
  * Convert a MessageEntity to MessageUiModel for display.
+ *
+ * @param is24Hour Whether to use 24-hour time format (from system settings)
  */
 fun MessageEntity.toUiModel(
     reactions: List<MessageEntity> = emptyList(),
@@ -28,7 +30,8 @@ fun MessageEntity.toUiModel(
     addressToName: Map<String, String> = emptyMap(),
     addressToAvatarPath: Map<String, String?> = emptyMap(),
     replyPreview: ReplyPreviewData? = null,
-    editHistory: List<EditHistoryEntry> = emptyList()
+    editHistory: List<EditHistoryEntry> = emptyList(),
+    is24Hour: Boolean = false
 ): MessageUiModel {
     // Filter reactions using old BlueBubbles Flutter logic:
     // 1. Remove duplicate GUIDs
@@ -112,7 +115,7 @@ fun MessageEntity.toUiModel(
         text = text,
         subject = subject,
         dateCreated = dateCreated,
-        formattedTime = formatMessageTime(dateCreated),
+        formattedTime = formatMessageTime(dateCreated, is24Hour),
         isFromMe = isFromMe,
         isSent = !guid.startsWith("temp-") && error == 0,
         isDelivered = dateDelivered != null,
@@ -141,7 +144,7 @@ fun MessageEntity.toUiModel(
         groupEventText = groupEventText,
         // Edit tracking
         dateEdited = dateEdited,
-        formattedEditTime = dateEdited?.let { formatMessageTime(it) },
+        formattedEditTime = dateEdited?.let { formatMessageTime(it, is24Hour) },
         editHistory = editHistory.toStable(),
         // Link embed fields
         isLinkEmbed = isLinkEmbed,

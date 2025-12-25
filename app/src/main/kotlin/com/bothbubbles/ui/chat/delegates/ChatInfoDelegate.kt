@@ -113,9 +113,11 @@ class ChatInfoDelegate @AssistedInject constructor(
                         address?.let { addr -> discordContactService.getDiscordChannelId(addr) }
                     } else null
 
-                    // Group photo path from UnifiedChatEntity (customAvatarPath > serverGroupPhotoPath)
-                    // This ensures the chat header matches the conversation list avatar
-                    val chatGroupPhotoPath = unifiedChat?.effectiveAvatarPath
+                    // Group photo path with priority:
+                    // 1. UnifiedChatEntity.customAvatarPath (user-set)
+                    // 2. UnifiedChatEntity.serverGroupPhotoPath (synced from server)
+                    // 3. ChatEntity.serverGroupPhotoPath (fallback for group chats where sync stores on ChatEntity)
+                    val chatGroupPhotoPath = unifiedChat?.effectiveAvatarPath ?: it.serverGroupPhotoPath
 
                     // Determine if all participants have saved contacts
                     // For 1:1 chats: check if the single participant has a cached display name

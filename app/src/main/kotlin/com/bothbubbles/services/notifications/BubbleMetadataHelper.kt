@@ -155,27 +155,25 @@ class BubbleMetadataHelper @Inject constructor(
 
     /**
      * Determines if bubbles should be shown for a conversation based on the filter mode.
-     * Uses cached bubble filter mode to avoid blocking the calling thread.
+     *
+     * NOTE: Android Chat Bubbles feature is currently disabled.
+     * Always returns false to prevent bubble notifications.
      *
      * @param chatGuid The chat GUID
      * @param senderAddress The sender's address (phone number or email)
-     * @return true if bubbles should be shown
+     * @return false - bubbles are disabled
      */
     fun shouldShowBubble(chatGuid: String, senderAddress: String?): Boolean {
-        return when (cachedBubbleFilterMode) {
-            "none" -> false
-            "all" -> true
-            "selected" -> cachedSelectedBubbleChats.contains(chatGuid)
-            // For favorites, we'd need to check Android contacts which requires async lookup
-            // Default to true and let system handle it
-            "favorites" -> true
-            else -> true
-        }
+        // Android Chat Bubbles feature disabled
+        return false
     }
 
     /**
      * Creates bubble metadata for a conversation notification.
      * This enables the notification to be displayed as a floating bubble.
+     *
+     * NOTE: Android Chat Bubbles feature is currently disabled.
+     * Always returns null to prevent bubble notifications.
      *
      * @param chatGuid Unique identifier for the chat
      * @param chatTitle Display name of the conversation
@@ -185,7 +183,7 @@ class BubbleMetadataHelper @Inject constructor(
      * @param senderAvatarPath Avatar path for 1:1 chat sender (contact photo URI)
      * @param participantAvatarPaths Avatar paths for group participants (corresponding to participantNames)
      * @param mergedGuids Comma-separated list of merged chat GUIDs for unified chat support
-     * @return BubbleMetadata for the notification, or null if bubbles aren't supported
+     * @return null - bubbles are disabled
      */
     fun createBubbleMetadata(
         chatGuid: String,
@@ -197,6 +195,11 @@ class BubbleMetadataHelper @Inject constructor(
         participantAvatarPaths: List<String?> = emptyList(),
         mergedGuids: String? = null
     ): NotificationCompat.BubbleMetadata? {
+        // Android Chat Bubbles feature disabled
+        return null
+
+        // Original implementation below (disabled):
+        /*
         // Bubbles require Android Q (API 29) or higher
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             Timber.d("Bubbles not supported: API level ${Build.VERSION.SDK_INT} < 29")
@@ -259,5 +262,6 @@ class BubbleMetadataHelper @Inject constructor(
 
         Timber.d("Created bubble metadata for chat: $chatGuid (title: $chatTitle)")
         return metadata
+        */
     }
 }

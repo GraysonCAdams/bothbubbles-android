@@ -137,7 +137,7 @@ fun GroupEventIndicator(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp),
+            .padding(vertical = 16.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
@@ -162,7 +162,7 @@ fun CalendarEventIndicator(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(vertical = 8.dp),
+            .padding(vertical = 16.dp),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically
     ) {

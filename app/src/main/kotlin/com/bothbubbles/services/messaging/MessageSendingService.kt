@@ -517,6 +517,67 @@ class MessageSendingService @Inject constructor(
     }
 
     /**
+     * Check if the server already has a matching message.
+     *
+     * Used for pre-retry deduplication: when a send times out, the server may have
+     * processed the message but the client never received the response. Before retrying,
+     * we check if the server already has the message to prevent duplicates.
+     *
+     * @param chatGuid The chat to check
+     * @param text The message text to match
+     * @param sentAttemptTime The timestamp when the original send was attempted
+     * @return The server GUID if a matching message is found, null otherwise
+     */
+    suspend fun checkServerForExistingMessage(
+        chatGuid: String,
+        text: String?,
+        sentAttemptTime: Long
+    ): String? {
+        return try {
+            // Query messages from 60 seconds before the send attempt
+            // This gives buffer for clock differences and processing time
+            val afterTime = sentAttemptTime - 60_000L
+
+            val response = api.getChatMessages(
+                guid = chatGuid,
+                after = afterTime,
+                limit = 15,
+                sort = "DESC",
+                with = "handle" // Minimal data needed
+            )
+
+            if (!response.isSuccessful) {
+                Timber.w("Pre-retry check failed: HTTP ${response.code()}")
+                return null
+            }
+
+            val messages = response.body()?.data ?: return null
+
+            // Look for a matching message:
+            // - isFromMe = true (we sent it)
+            // - Text matches (normalize for comparison)
+            // - dateCreated is after our send attempt minus tolerance
+            val normalizedText = text?.trim()?.lowercase() ?: ""
+            val matchingMessage = messages.firstOrNull { msg ->
+                msg.isFromMe &&
+                    (msg.text?.trim()?.lowercase() ?: "") == normalizedText &&
+                    (msg.dateCreated ?: 0) >= sentAttemptTime - 30_000L
+            }
+
+            if (matchingMessage != null) {
+                Timber.i("Pre-retry check: Found existing message on server: ${matchingMessage.guid}")
+                matchingMessage.guid
+            } else {
+                Timber.d("Pre-retry check: No matching message found on server")
+                null
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "Pre-retry check failed with exception")
+            null
+        }
+    }
+
+    /**
      * Forward a message to another conversation.
      * Copies the message text and attachments to the target chat.
      */

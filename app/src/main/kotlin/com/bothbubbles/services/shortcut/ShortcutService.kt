@@ -186,12 +186,15 @@ class ShortcutService @Inject constructor(
 
         // Add unified chats (1:1 chats)
         for (chat in unifiedChats) {
-            val displayName = chat.displayName
-                ?: PhoneNumberFormatter.format(chat.normalizedAddress)
-
             // Use effective avatar path from unified chat, or look up from handle
             val handle = handleDao.getHandleByAddressAny(chat.normalizedAddress)
             val avatarPath = chat.effectiveAvatarPath ?: handle?.cachedAvatarPath
+
+            // Display name priority: handle's resolved name > chat displayName > formatted address
+            // handle.displayName uses: cachedDisplayName > "Maybe: inferred" > formattedAddress > formatted raw
+            val displayName = handle?.displayName
+                ?: chat.displayName
+                ?: PhoneNumberFormatter.format(chat.normalizedAddress)
 
             Timber.tag(TAG).d(
                 "Unified chat: identifier=${chat.normalizedAddress}, " +
@@ -231,13 +234,17 @@ class ShortcutService @Inject constructor(
         }
 
         for (chat in groupChats) {
-            val displayName = chat.displayName
-                ?: chat.chatIdentifier
-                ?: "Group"
-
-            // Get participants for this group chat (for collage avatar)
+            // Get participants for this group chat (for collage avatar and display name)
             val participants = allParticipants[chat.guid] ?: emptyList()
             val participantNames = participants.map { it.handle.displayName }
+
+            // Display name priority: explicit group name > participant names > "Group"
+            // Never fall back to chatIdentifier as it's a raw GUID like "iMessage;+1;chat123"
+            val displayName = chat.displayName?.takeIf { it.isNotBlank() }
+                ?: participantNames.take(3).joinToString(", ")
+                    .let { names -> if (participants.size > 3) "$names +${participants.size - 3}" else names }
+                    .takeIf { it.isNotBlank() }
+                ?: "Group"
             val participantAvatarPaths = participants.map { it.handle.cachedAvatarPath }
 
             // Get avatar from unified chat

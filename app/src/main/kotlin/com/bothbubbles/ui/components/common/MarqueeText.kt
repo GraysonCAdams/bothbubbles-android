@@ -21,7 +21,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.rememberTextMeasurer
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import kotlinx.coroutines.delay
 
@@ -120,34 +119,25 @@ fun MarqueeText(
 
     Box(
         modifier = modifier
+            .fillMaxWidth()
             .clipToBounds()
             .onSizeChanged { size ->
                 containerWidth = size.width.toFloat()
                 shouldScroll = textWidth > containerWidth && containerWidth > 0
             }
     ) {
-        if (shouldScroll && containerWidth > 0) {
-            Text(
-                text = text,
-                style = style,
-                color = color,
-                maxLines = 1,
-                softWrap = false,
-                modifier = Modifier
-                    .graphicsLayer {
-                        translationX = -marqueeOffset.value
-                    }
-            )
-        } else {
-            // No scrolling needed - just show text with ellipsis if needed
-            Text(
-                text = text,
-                style = style,
-                color = color,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
+        // Always render full text with translation - never use ellipsis which would crop first
+        // The clipToBounds() on the Box creates the viewport, translation scrolls through it
+        Text(
+            text = text,
+            style = style,
+            color = color,
+            maxLines = 1,
+            softWrap = false,
+            modifier = Modifier
+                .graphicsLayer {
+                    translationX = if (shouldScroll) -marqueeOffset.value else 0f
+                }
+        )
     }
 }

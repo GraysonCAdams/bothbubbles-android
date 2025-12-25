@@ -122,12 +122,36 @@ class ChatViewModel @Inject constructor(
 
     // For merged conversations (iMessage + SMS), contains all chat GUIDs
     // If mergedGuids is null or has single entry, this is a regular (non-merged) chat
+    // IMPORTANT: If mergedGuids not provided (e.g., from notification tap with stale cache),
+    // we look up the merged guids from the database to ensure unified chat displays all messages.
     private val mergedChatGuids: List<String> = run {
         val mergedGuidsStr: String? = savedStateHandle["mergedGuids"]
-        if (mergedGuidsStr.isNullOrBlank()) {
-            listOf(chatGuid)
-        } else {
+        if (!mergedGuidsStr.isNullOrBlank()) {
+            // Use the provided merged guids from navigation
             mergedGuidsStr.split(",").filter { it.isNotBlank() }
+        } else {
+            // Fallback: Look up merged guids from database
+            // This handles notification taps where the cache didn't have merged guids
+            kotlinx.coroutines.runBlocking {
+                try {
+                    val chat = chatRepository.getChat(chatGuid)
+                    val unifiedChatId = chat?.unifiedChatId
+                    if (unifiedChatId != null) {
+                        val guids = chatRepository.getChatGuidsForUnifiedChat(unifiedChatId)
+                        if (guids.size > 1) {
+                            Timber.d("NOTIFICATION_DEBUG: Looked up merged guids from DB for $chatGuid -> $guids")
+                            guids
+                        } else {
+                            listOf(chatGuid)
+                        }
+                    } else {
+                        listOf(chatGuid)
+                    }
+                } catch (e: Exception) {
+                    Timber.w(e, "Failed to lookup merged guids for $chatGuid")
+                    listOf(chatGuid)
+                }
+            }
         }
     }
 

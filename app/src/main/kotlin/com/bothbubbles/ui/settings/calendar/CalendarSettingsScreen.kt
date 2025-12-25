@@ -4,9 +4,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
@@ -19,6 +22,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bothbubbles.services.calendar.DeviceCalendar
 import com.bothbubbles.ui.components.common.Avatar
+import com.bothbubbles.ui.settings.components.SettingsCard
 import com.bothbubbles.util.PhoneNumberFormatter
 import kotlinx.coroutines.launch
 
@@ -106,15 +110,30 @@ fun CalendarSettingsScreen(
                         )
                     }
 
-                    items(
-                        items = uiState.associations,
-                        key = { it.association.linkedAddress }
-                    ) { item ->
-                        CalendarAssociationItem(
-                            item = item,
-                            onEditClick = { showEditDialog = item },
-                            onRemoveClick = { viewModel.removeAssociation(item.association.linkedAddress) }
-                        )
+                    item {
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp)
+                        ) {
+                            Column {
+                                uiState.associations.forEachIndexed { index, item ->
+                                    CalendarAssociationItem(
+                                        item = item,
+                                        onEditClick = { showEditDialog = item },
+                                        onRemoveClick = { viewModel.removeAssociation(item.association.linkedAddress) }
+                                    )
+                                    if (index < uiState.associations.lastIndex) {
+                                        HorizontalDivider(
+                                            modifier = Modifier.padding(start = 72.dp),
+                                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -190,6 +209,9 @@ private fun CalendarAssociationItem(
                 }
             }
         },
+        colors = ListItemDefaults.colors(
+            containerColor = Color.Transparent
+        ),
         modifier = modifier.clickable(onClick = onEditClick)
     )
 }
@@ -239,32 +261,41 @@ private fun CalendarEditDialog(
                     Text("No calendars available")
                 }
             } else {
-                LazyColumn(
-                    modifier = Modifier.heightIn(max = 400.dp)
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    items(calendars) { calendar ->
-                        ListItem(
-                            headlineContent = { Text(calendar.displayName) },
-                            supportingContent = calendar.accountName?.let { { Text(it) } },
-                            leadingContent = {
-                                Icon(
-                                    imageVector = Icons.Default.CalendarMonth,
-                                    contentDescription = null,
-                                    tint = calendar.color?.let { Color(it) }
-                                        ?: MaterialTheme.colorScheme.primary
-                                )
-                            },
-                            trailingContent = if (calendar.id == currentCalendarId) {
-                                {
+                    LazyColumn(
+                        modifier = Modifier.heightIn(max = 400.dp)
+                    ) {
+                        items(calendars) { calendar ->
+                            ListItem(
+                                headlineContent = { Text(calendar.displayName) },
+                                supportingContent = calendar.accountName?.let { { Text(it) } },
+                                leadingContent = {
                                     Icon(
                                         imageVector = Icons.Default.CalendarMonth,
-                                        contentDescription = "Selected",
-                                        tint = MaterialTheme.colorScheme.primary
+                                        contentDescription = null,
+                                        tint = calendar.color?.let { Color(it) }
+                                            ?: MaterialTheme.colorScheme.primary
                                     )
-                                }
-                            } else null,
-                            modifier = Modifier.clickable { onCalendarSelected(calendar) }
-                        )
+                                },
+                                trailingContent = if (calendar.id == currentCalendarId) {
+                                    {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = "Selected",
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                } else null,
+                                colors = ListItemDefaults.colors(
+                                    containerColor = Color.Transparent
+                                ),
+                                modifier = Modifier.clickable { onCalendarSelected(calendar) }
+                            )
+                        }
                     }
                 }
             }
@@ -341,15 +372,30 @@ fun CalendarSettingsContent(
                     )
                 }
 
-                items(
-                    items = uiState.associations,
-                    key = { it.association.linkedAddress }
-                ) { item ->
-                    CalendarAssociationItem(
-                        item = item,
-                        onEditClick = { showEditDialog = item },
-                        onRemoveClick = { viewModel.removeAssociation(item.association.linkedAddress) }
-                    )
+                item {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                    ) {
+                        Column {
+                            uiState.associations.forEachIndexed { index, item ->
+                                CalendarAssociationItem(
+                                    item = item,
+                                    onEditClick = { showEditDialog = item },
+                                    onRemoveClick = { viewModel.removeAssociation(item.association.linkedAddress) }
+                                )
+                                if (index < uiState.associations.lastIndex) {
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(start = 72.dp),
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

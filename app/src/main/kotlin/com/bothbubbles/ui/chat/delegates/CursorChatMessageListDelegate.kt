@@ -544,7 +544,8 @@ class CursorChatMessageListDelegate @AssistedInject constructor(
                 addressToName = mutableAddressToName,
                 addressToAvatarPath = addressToAvatarPath,
                 replyPreview = replyPreview,
-                editHistory = editHistory
+                editHistory = editHistory,
+                is24Hour = is24Hour
             )
         }
 
@@ -652,7 +653,7 @@ class CursorChatMessageListDelegate @AssistedInject constructor(
                     EditHistoryEntry(
                         text = entity.previousText,
                         editedAt = entity.editedAt,
-                        formattedTime = formatMessageTime(entity.editedAt)
+                        formattedTime = formatMessageTime(entity.editedAt, is24Hour)
                     )
                 }
             } catch (e: Exception) {
@@ -777,7 +778,7 @@ class CursorChatMessageListDelegate @AssistedInject constructor(
             text = queuedInfo.text,
             subject = null,
             dateCreated = queuedInfo.dateCreated,
-            formattedTime = formatMessageTime(queuedInfo.dateCreated),
+            formattedTime = formatMessageTime(queuedInfo.dateCreated, is24Hour),
             isFromMe = true,
             isSent = false,
             isDelivered = false,
@@ -866,7 +867,7 @@ class CursorChatMessageListDelegate @AssistedInject constructor(
             text = message.text,
             subject = message.subject,
             dateCreated = dateCreated,
-            formattedTime = formatMessageTime(dateCreated),
+            formattedTime = formatMessageTime(dateCreated, is24Hour),
             isFromMe = false,
             isSent = true, // Incoming messages are already "sent"
             isDelivered = true,

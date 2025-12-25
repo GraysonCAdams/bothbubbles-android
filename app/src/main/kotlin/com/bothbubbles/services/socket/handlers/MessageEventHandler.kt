@@ -222,7 +222,8 @@ class MessageEventHandler @Inject constructor(
                     linkPreviewDomain = linkDomain,
                     participantNames = participantNames,
                     participantAvatarPaths = participantAvatarPaths,
-                    groupAvatarPath = unifiedChat?.effectiveAvatarPath,
+                    // Priority: UnifiedChatEntity avatar > ChatEntity serverGroupPhotoPath (fallback for group chats)
+                    groupAvatarPath = unifiedChat?.effectiveAvatarPath ?: chat?.serverGroupPhotoPath,
                     subject = savedMessage.subject
                 )
             )
@@ -323,7 +324,8 @@ class MessageEventHandler @Inject constructor(
                 avatarUri = senderAvatarUri,
                 participantNames = participantNames,
                 participantAvatarPaths = participantAvatarPaths,
-                groupAvatarPath = unifiedChat?.effectiveAvatarPath,
+                // Priority: UnifiedChatEntity avatar > ChatEntity serverGroupPhotoPath (fallback for group chats)
+                groupAvatarPath = unifiedChat?.effectiveAvatarPath ?: chat?.serverGroupPhotoPath,
                 subject = messageDto.subject
             )
         )

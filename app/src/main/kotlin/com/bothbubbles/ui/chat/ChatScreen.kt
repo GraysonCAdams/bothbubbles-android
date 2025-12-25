@@ -89,6 +89,9 @@ fun ChatScreen(
     sharedText: String? = null,
     sharedUris: List<Uri> = emptyList(),
     onSharedContentHandled: () -> Unit = {},
+    // Direct share support - finish activity after sending message from share intent
+    isFromDirectShare: Boolean = false,
+    onDirectShareCompleted: () -> Unit = {},
     activateSearch: Boolean = false,
     onSearchActivated: () -> Unit = {},
     initialScrollPosition: Int = 0,
@@ -138,6 +141,19 @@ fun ChatScreen(
     )
     val context = LocalContext.current
     val keyboardController = LocalSoftwareKeyboardController.current
+
+    // Direct share support: capture callback for use in send handlers
+    val currentOnDirectShareCompleted by rememberUpdatedState(onDirectShareCompleted)
+
+    // Helper to send message and finish activity if from direct share
+    val sendMessageAndFinishIfDirectShare: (String?) -> Unit = remember(isFromDirectShare) {
+        { effectId ->
+            viewModel.sendMessage(effectId)
+            if (isFromDirectShare) {
+                currentOnDirectShareCompleted()
+            }
+        }
+    }
 
     // Consolidated scroll effects: keyboard hiding, load more, scroll position tracking
     // See ChatScrollHelper.kt for implementation details
@@ -572,7 +588,13 @@ fun ChatScreen(
                 onSmartReplyClick = { suggestion ->
                     viewModel.updateDraft(suggestion.text)
                 },
-                onComposerEvent = { event -> viewModel.onComposerEvent(event) },
+                onComposerEvent = { event ->
+                    viewModel.onComposerEvent(event)
+                    // Finish activity after send if from direct share
+                    if (event is com.bothbubbles.ui.chat.composer.ComposerEvent.Send && isFromDirectShare) {
+                        currentOnDirectShareCompleted()
+                    }
+                },
                 onMediaSelected = { uris -> viewModel.composer.addAttachments(uris) },
                 onFileClick = { filePickerLauncher.launch(arrayOf("*/*")) },
                 onLocationClick = {
@@ -599,7 +621,7 @@ fun ChatScreen(
                 onEditAttachmentClick = onEditAttachmentClick,
                 onSendVoiceMemo = { uri ->
                     viewModel.composer.addAttachment(uri)
-                    viewModel.sendMessage()
+                    sendMessageAndFinishIfDirectShare(null)
                 },
                 onSendButtonBoundsChanged = { bounds -> state.sendButtonBounds = bounds },
                 onSizeChanged = { height -> state.composerHeightPx = height.toFloat() },
@@ -889,7 +911,7 @@ fun ChatScreen(
         onEffectSelected = { effect ->
             state.showEffectPicker = false
             if (effect != null) {
-                viewModel.sendMessage(effect.appleId)
+                sendMessageAndFinishIfDirectShare(effect.appleId)
                 viewModel.composer.dismissPanel()
             }
         },
@@ -1012,15 +1034,10 @@ fun ChatScreen(
                 viewModel.reels.updateTapback(messageGuid, url, tapback)
                 // Send tapback to the original message (iMessage only)
                 // Only send if chat is iMessage (not local SMS)
-                if (!chatInfoState.isLocalSmsChat) {
+                if (!chatInfoState.isLocalSmsChat && tapback != null) {
                     viewModel.toggleReaction(
                         messageGuid = messageGuid,
-                        tapback = when (tapback) {
-                            ReelsTapback.LIKE -> Tapback.LIKE
-                            ReelsTapback.LAUGH -> Tapback.LAUGH
-                            ReelsTapback.LOVE -> Tapback.LOVE
-                            ReelsTapback.DISLIKE -> Tapback.DISLIKE
-                        }
+                        tapback = tapback.toTapback()
                     )
                 }
             },

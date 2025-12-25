@@ -247,7 +247,12 @@ private fun ChatBubblesSection(
     onBubbleFilterModeChange: (String) -> Unit,
     onBubbleChatSelectorClick: () -> Unit
 ) {
+    // Android Chat Bubbles feature is disabled - hide this entire section
+    return
+
+    @Suppress("UNREACHABLE_CODE")
     val context = LocalContext.current
+    @Suppress("UNREACHABLE_CODE")
     var showBubbleFilterDialog by remember { mutableStateOf(false) }
 
     // Don't show section if device doesn't support bubbles

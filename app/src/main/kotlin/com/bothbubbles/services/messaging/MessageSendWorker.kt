@@ -215,6 +215,43 @@ class MessageSendWorker @AssistedInject constructor(
             }
         }
 
+        // ═══════════════════════════════════════════════════════════════════════════
+        // PRE-RETRY DEDUPLICATION: Check if server already has this message.
+        // When a send times out, the server may have processed the message but we
+        // never received the response. Before retrying, check if it's already there.
+        // This prevents duplicate messages when the HTTP timeout occurs after server
+        // processing but before client receives the response.
+        // ═══════════════════════════════════════════════════════════════════════════
+        if (runAttemptCount > 0 && pendingMessage.createdAt > 0) {
+            Timber.d("Retry attempt ${runAttemptCount + 1}, checking if server already has message...")
+
+            val existingGuid = messageSendingService.checkServerForExistingMessage(
+                chatGuid = pendingMessage.chatGuid,
+                text = pendingMessage.text,
+                sentAttemptTime = pendingMessage.createdAt
+            )
+
+            if (existingGuid != null) {
+                Timber.i("Pre-retry found existing message on server: $existingGuid, skipping retry")
+
+                // Save serverGuid and go to confirmation (same as serverGuid already set case)
+                pendingMessageDao.updateServerGuid(pendingMessageId, existingGuid)
+
+                val confirmationResult = waitForServerConfirmation(
+                    serverGuid = existingGuid,
+                    pendingMessageId = pendingMessageId,
+                    chatGuid = pendingMessage.chatGuid
+                )
+
+                return if (confirmationResult.isSuccess) {
+                    pendingMessageDao.markAsSent(pendingMessageId, existingGuid)
+                    Result.success()
+                } else {
+                    handleServerError(pendingMessageId, pendingMessage.chatGuid, confirmationResult.exceptionOrNull())
+                }
+            }
+        }
+
         Timber.d("Sending message ${pendingMessage.localId} (attempt ${runAttemptCount + 1})")
 
         // Update status to SENDING

@@ -71,7 +71,10 @@ class ChatCalendarEventsDelegate @AssistedInject constructor(
                         if (address != null) {
                             calendarEventOccurrenceRepository.observeForAddress(address)
                                 .map { entities ->
-                                    entities.map { CalendarEventItem.fromEntity(it) }
+                                    val now = System.currentTimeMillis()
+                                    entities
+                                        .filter { it.eventStartTime <= now } // Only show events that have started
+                                        .map { CalendarEventItem.fromEntity(it) }
                                 }
                         } else {
                             // Group chats - don't show calendar events (too noisy)

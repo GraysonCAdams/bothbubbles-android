@@ -22,6 +22,7 @@ import com.bothbubbles.core.network.api.BothBubblesApi
 import com.bothbubbles.core.network.api.dto.MessageDto
 import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.services.nameinference.NameInferenceService
+import com.bothbubbles.services.notifications.NotificationBuilder
 import com.bothbubbles.services.socialmedia.SocialMediaDownloadService
 import com.bothbubbles.util.UnifiedChatIdGenerator
 import com.bothbubbles.util.parsing.HtmlEntityDecoder
@@ -56,6 +57,7 @@ class IncomingMessageHandler @Inject constructor(
     private val settingsDataStore: SettingsDataStore,
     private val nameInferenceService: NameInferenceService,
     private val socialMediaDownloadService: SocialMediaDownloadService,
+    private val notificationBuilder: NotificationBuilder,
     private val api: BothBubblesApi,
     @ApplicationScope private val applicationScope: CoroutineScope
 ) : IncomingMessageProcessor {
@@ -375,6 +377,10 @@ class IncomingMessageHandler @Inject constructor(
 
         // Link the chat to this unified chat
         chatDao.setUnifiedChatId(chatGuid, unifiedChat.id)
+
+        // Invalidate notification cache so merged guids are correctly included in notifications
+        // This ensures notifications for unified chats navigate to the combined conversation
+        notificationBuilder.invalidateUnifiedGroupCache()
 
         return unifiedChat.id
     }

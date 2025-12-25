@@ -27,13 +27,19 @@ data class CalendarEventItem(
      * Formatted display text for the chat timeline.
      *
      * Format examples:
-     * - "WFH - All Day"
-     * - "Coffee with Jessica (started 5m ago)"
-     * - "train home (ended 2h ago)"
+     * - "10:30 AM · WFH - All Day"
+     * - "2:30 PM · Coffee with Jessica (started 5m ago)"
+     * - "9:00 AM · train home (ended 2h ago)"
+     *
+     * @param formattedStartTime The event start time formatted according to system 12h/24h setting
+     * @param currentTime Current time for calculating relative timing
      */
-    fun getDisplayText(currentTime: Long = System.currentTimeMillis()): String {
+    fun getDisplayText(
+        formattedStartTime: String,
+        currentTime: Long = System.currentTimeMillis()
+    ): String {
         val timingInfo = getTimingInfo(currentTime)
-        return "$eventTitle$timingInfo"
+        return "$formattedStartTime · $eventTitle$timingInfo"
     }
 
     /**
