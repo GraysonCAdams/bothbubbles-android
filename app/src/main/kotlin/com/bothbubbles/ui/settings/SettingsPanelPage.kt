@@ -70,4 +70,10 @@ sealed class SettingsPanelPage {
 
     /** Storage management */
     data object Storage : SettingsPanelPage()
+
+    /** Media & content settings (link previews, social media, image quality) */
+    data object MediaContent : SettingsPanelPage()
+
+    /** Calendar integrations */
+    data object Calendar : SettingsPanelPage()
 }

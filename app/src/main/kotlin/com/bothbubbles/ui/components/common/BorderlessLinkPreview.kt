@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.bothbubbles.data.local.db.entity.LinkPreviewEntity
+import com.bothbubbles.util.parsing.HtmlEntityDecoder
 
 /**
  * Borderless link preview components.
@@ -176,7 +177,7 @@ fun BorderlessLinkPreviewCard(
                 preview.title?.takeIf { it.isNotBlank() }?.let { title ->
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = title,
+                        text = HtmlEntityDecoder.decode(title) ?: title,
                         style = MaterialTheme.typography.titleSmall,
                         color = textColor,
                         maxLines = 2,

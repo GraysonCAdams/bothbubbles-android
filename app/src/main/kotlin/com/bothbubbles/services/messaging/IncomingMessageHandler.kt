@@ -353,7 +353,8 @@ class IncomingMessageHandler @Inject constructor(
             UnifiedChatEntity(
                 id = UnifiedChatIdGenerator.generate(),
                 normalizedAddress = normalizedAddress,
-                sourceId = chatGuid // The first chat becomes the source
+                sourceId = chatGuid, // The first chat becomes the source
+                isGroup = isGroup
             )
         )
 

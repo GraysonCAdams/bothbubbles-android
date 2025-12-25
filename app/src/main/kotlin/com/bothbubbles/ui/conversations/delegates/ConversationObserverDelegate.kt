@@ -145,7 +145,6 @@ class ConversationObserverDelegate @AssistedInject constructor(
             ) { _, _, _, _, _ -> Unit }
                 .debounce(100) // Reduced debounce for faster UI updates
                 .collect {
-                    Timber.tag("ConvoDebug").d("DataChanged triggered - emitting refresh event")
                     _events.emit(ConversationEvent.DataChanged)
                 }
         }
@@ -332,6 +331,21 @@ class ConversationObserverDelegate @AssistedInject constructor(
                     )
                 }
             }
+            is SyncState.Paused -> {
+                // Paused due to network conditions - treat as waiting
+                hasAnyActivity = true
+                currentStage = "Sync paused (waiting for WiFi)"
+                stages.add(
+                    StageProgress(
+                        type = SyncStageType.IMESSAGE,
+                        name = "iMessage sync",
+                        status = StageStatus.WAITING,
+                        progress = iMessageState.previousProgress,
+                        weight = 0.6f,
+                        detail = "Paused: ${iMessageState.reason}"
+                    )
+                )
+            }
         }
 
         // SMS import stage (weight: 25%)
@@ -476,15 +490,11 @@ class ConversationObserverDelegate @AssistedInject constructor(
     }
 
     private fun buildIMessageDetail(state: SyncState.Syncing): String? {
-        return buildString {
-            if (state.totalChats > 0) {
-                append("${state.processedChats} of ${state.totalChats} chats")
-            }
-            if (state.syncedMessages > 0) {
-                if (isNotEmpty()) append(" • ")
-                append("${state.syncedMessages} messages")
-            }
-        }.takeIf { it.isNotEmpty() }
+        return if (state.totalChats > 0) {
+            "${state.processedChats} of ${state.totalChats} threads"
+        } else {
+            null
+        }
     }
 
     // ============================================================================

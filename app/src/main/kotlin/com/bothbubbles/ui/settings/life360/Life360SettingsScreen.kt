@@ -25,7 +25,9 @@ import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -39,6 +41,8 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -49,8 +53,10 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -80,6 +86,9 @@ fun Life360SettingsScreen(
     val availableHandles by viewModel.availableHandles.collectAsState()
     val handleDisplayNames by viewModel.handleDisplayNames.collectAsState()
 
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -107,7 +116,8 @@ fun Life360SettingsScreen(
                     }
                 }
             )
-        }
+        },
+        snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
         Box(modifier = Modifier.padding(padding)) {
             if (!uiState.isAuthenticated) {
@@ -127,7 +137,12 @@ fun Life360SettingsScreen(
                     onMapMember = viewModel::mapMemberToContact,
                     onUnmapMember = viewModel::unmapMember,
                     onLogout = viewModel::logout,
-                    onClearError = viewModel::clearError
+                    onClearError = viewModel::clearError,
+                    onShowUnlinkSuccess = {
+                        scope.launch {
+                            snackbarHostState.showSnackbar("Life360 disconnected successfully")
+                        }
+                    }
                 )
             }
         }
@@ -151,6 +166,9 @@ fun Life360SettingsContent(
     val availableHandles by viewModel.availableHandles.collectAsState()
     val handleDisplayNames by viewModel.handleDisplayNames.collectAsState()
 
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+
     Box(modifier = modifier.fillMaxSize()) {
         if (!uiState.isAuthenticated) {
             TokenEntryScreen(
@@ -169,9 +187,20 @@ fun Life360SettingsContent(
                 onMapMember = viewModel::mapMemberToContact,
                 onUnmapMember = viewModel::unmapMember,
                 onLogout = viewModel::logout,
-                onClearError = viewModel::clearError
+                onClearError = viewModel::clearError,
+                onShowUnlinkSuccess = {
+                    scope.launch {
+                        snackbarHostState.showSnackbar("Life360 disconnected successfully")
+                    }
+                }
             )
         }
+
+        // Snackbar host for showing unlink success message
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
     }
 }
 
@@ -191,11 +220,45 @@ private fun TokenEntryScreen(
     var loginMethod by rememberSaveable { mutableStateOf(LoginMethod.NONE) }
     var manualToken by rememberSaveable { mutableStateOf("") }
     var showManualEntry by rememberSaveable { mutableStateOf(false) }
+    var showDisclaimer by rememberSaveable { mutableStateOf(false) }
+    var pendingAction by rememberSaveable { mutableStateOf<String?>(null) } // "webview" or "manual"
+    var showWebViewDisclaimer by rememberSaveable { mutableStateOf(false) }
+
+    // Show disclaimer dialog (for pre-login confirmation)
+    if (showDisclaimer) {
+        Life360DisclaimerDialog(
+            isConnected = false,
+            onProceed = {
+                showDisclaimer = false
+                when (pendingAction) {
+                    "webview" -> loginMethod = LoginMethod.WEBVIEW
+                    "manual" -> onTokenSubmit(manualToken)
+                }
+                pendingAction = null
+            },
+            onUnlink = { /* Not applicable for non-connected state */ },
+            onDismiss = {
+                showDisclaimer = false
+                pendingAction = null
+            }
+        )
+    }
+
+    // Show disclaimer dialog (from webview warning icon)
+    if (showWebViewDisclaimer) {
+        Life360DisclaimerDialog(
+            isConnected = false,
+            onProceed = { showWebViewDisclaimer = false },
+            onUnlink = { /* Not applicable for non-connected state */ },
+            onDismiss = { showWebViewDisclaimer = false }
+        )
+    }
 
     when (loginMethod) {
         LoginMethod.WEBVIEW -> {
             Life360LoginWebView(
-                onTokenExtracted = onTokenSubmit
+                onTokenExtracted = onTokenSubmit,
+                onShowDisclaimer = { showWebViewDisclaimer = true }
             )
         }
 
@@ -234,7 +297,10 @@ private fun TokenEntryScreen(
 
                 // Primary option: WebView login
                 Button(
-                    onClick = { loginMethod = LoginMethod.WEBVIEW },
+                    onClick = {
+                        pendingAction = "webview"
+                        showDisclaimer = true
+                    },
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Icon(
@@ -289,7 +355,10 @@ private fun TokenEntryScreen(
                                 }
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Button(
-                                    onClick = { onTokenSubmit(manualToken) },
+                                    onClick = {
+                                        pendingAction = "manual"
+                                        showDisclaimer = true
+                                    },
                                     enabled = manualToken.isNotBlank()
                                 ) {
                                     Text("Connect")
@@ -316,11 +385,13 @@ private fun Life360SettingsContentInternal(
     onMapMember: (String, String) -> Unit,
     onUnmapMember: (String) -> Unit,
     onLogout: () -> Unit,
-    onClearError: () -> Unit
+    onClearError: () -> Unit,
+    onShowUnlinkSuccess: () -> Unit = {}
 ) {
     // Note: memberToMap is intentionally using remember (not rememberSaveable)
     // because Life360Member is not Parcelable/Serializable and is ephemeral dialog state
     var memberToMap by remember { mutableStateOf<Life360Member?>(null) }
+    var showDisclaimer by rememberSaveable { mutableStateOf(false) }
 
     // Contact picker dialog
     memberToMap?.let { member ->
@@ -332,6 +403,20 @@ private fun Life360SettingsContentInternal(
                 memberToMap = null
             },
             onDismiss = { memberToMap = null }
+        )
+    }
+
+    // Disclaimer dialog (for connected state - shows Unlink option)
+    if (showDisclaimer) {
+        Life360DisclaimerDialog(
+            isConnected = true,
+            onProceed = { showDisclaimer = false },
+            onUnlink = {
+                showDisclaimer = false
+                onLogout()
+                onShowUnlinkSuccess()
+            },
+            onDismiss = { showDisclaimer = false }
         )
     }
 
@@ -414,6 +499,32 @@ private fun Life360SettingsContentInternal(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("Disconnect Life360")
+            }
+        }
+
+        // Unofficial integration warning
+        item {
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showDisclaimer = true }
+                    .padding(vertical = 8.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.WarningAmber,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "Unofficial integration - tap for details",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.7f)
+                )
             }
         }
     }
@@ -665,4 +776,106 @@ private fun formatRelativeTime(timestamp: Long): String {
         diff < 86_400_000 -> "${diff / 3_600_000}h ago"
         else -> SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(timestamp))
     }
+}
+
+/**
+ * Disclaimer dialog for Life360 integration.
+ * Warns users about the unofficial API access method.
+ *
+ * @param isConnected Whether Life360 is currently connected (shows Unlink vs Nevermind)
+ * @param onProceed Called when user chooses to proceed anyway
+ * @param onUnlink Called when user chooses to unlink (only shown when connected)
+ * @param onDismiss Called when user cancels/dismisses
+ */
+@Composable
+fun Life360DisclaimerDialog(
+    isConnected: Boolean,
+    onProceed: () -> Unit,
+    onUnlink: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = {
+            Icon(
+                imageVector = Icons.Default.WarningAmber,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.error,
+                modifier = Modifier.size(48.dp)
+            )
+        },
+        title = {
+            Text(
+                text = "Unofficial Integration Notice",
+                style = MaterialTheme.typography.headlineSmall
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = "This integration uses an unofficial method to access Life360 data. " +
+                        "By proceeding, you acknowledge and accept the following:",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+
+                Column(
+                    modifier = Modifier.padding(start = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "• This feature accesses Life360 through token extraction, not an official API.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "• Life360 does not provide a public API for third-party applications.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "• Use of this feature may not be in compliance with Life360's Terms of Service.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "• This integration may cease to function at any time without notice.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "• You assume all risk associated with using this unofficial integration.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                Text(
+                    text = "Proceed at your own discretion.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+        },
+        confirmButton = {
+            if (isConnected) {
+                Button(
+                    onClick = onUnlink,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Text("Unlink Life360")
+                }
+            } else {
+                Button(onClick = onProceed) {
+                    Text("Proceed Anyway")
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(if (isConnected) "Nevermind" else "Cancel")
+            }
+        }
+    )
 }

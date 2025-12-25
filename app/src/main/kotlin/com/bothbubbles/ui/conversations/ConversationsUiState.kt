@@ -53,7 +53,11 @@ data class ConversationsUiState(
     val conversationFilter: String = "all",
     val categoryFilter: String? = null,
     // Total unread count from database (matches app icon badge)
-    val totalUnreadCount: Int = 0
+    val totalUnreadCount: Int = 0,
+    // Fetch all messages dialog state (shown in search when initial sync incomplete)
+    val initialSyncComplete: Boolean = false,
+    val showFetchAllMessagesDialog: Boolean = false,
+    val syncOnCellular: Boolean = false
 ) {
     /**
      * True when there's a problem in settings that needs attention.

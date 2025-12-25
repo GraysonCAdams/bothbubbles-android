@@ -10,8 +10,17 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -22,6 +31,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import timber.log.Timber
 
@@ -33,9 +43,11 @@ private const val LIFE360_LOGIN_URL = "https://www.life360.com/login"
  * Intercepts the OAuth token response when the user completes login
  * and extracts the access_token automatically via JavaScript injection.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun Life360LoginWebView(
     onTokenExtracted: (String) -> Unit,
+    onShowDisclaimer: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var isLoading by rememberSaveable { mutableStateOf(true) }
@@ -53,6 +65,21 @@ fun Life360LoginWebView(
     }
 
     Column(modifier = modifier.fillMaxSize()) {
+        // Top bar with warning icon
+        TopAppBar(
+            title = { Text("Sign in to Life360") },
+            actions = {
+                IconButton(onClick = onShowDisclaimer) {
+                    Icon(
+                        imageVector = Icons.Default.WarningAmber,
+                        contentDescription = "View disclaimer",
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
+        )
+
         // Loading indicator
         if (isLoading) {
             LinearProgressIndicator(

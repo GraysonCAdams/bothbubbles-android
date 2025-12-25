@@ -26,6 +26,7 @@ import com.bothbubbles.services.fcm.FirebaseDatabaseService
 import com.bothbubbles.services.notifications.BadgeManager
 import com.bothbubbles.services.notifications.NotificationLinkPreviewUpdater
 import com.bothbubbles.services.notifications.NotificationMediaUpdater
+import com.bothbubbles.services.calendar.CalendarEventSyncWorker
 import com.bothbubbles.services.life360.Life360SyncWorker
 import com.bothbubbles.services.life360.Life360TokenStorage
 import com.bothbubbles.services.socket.SocketEventHandler
@@ -229,6 +230,9 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
 
         // Schedule Life360 sync worker (if authenticated)
         initializeLife360Sync()
+
+        // Schedule calendar event sync worker (for contacts with calendar associations)
+        initializeCalendarEventSync()
 
         // Self-healing: repair chats with missing messages
         initializeRepairSync()
@@ -511,6 +515,26 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
     private fun initializeLife360Sync() {
         // Background sync disabled - Life360 data is fetched on-demand when viewing contacts
         Timber.d("Life360 background sync disabled, using foreground-only polling")
+    }
+
+    /**
+     * Schedule calendar event sync worker for contacts with calendar associations.
+     *
+     * This worker syncs upcoming calendar events (next 24 hours) for contacts that have
+     * linked calendars. Events are displayed as chat events in the conversation timeline.
+     * Only runs after setup is complete to avoid wasted work.
+     */
+    private fun initializeCalendarEventSync() {
+        applicationScope.launch(ioDispatcher) {
+            try {
+                val setupComplete = settingsDataStore.isSetupComplete.first()
+                if (!setupComplete) return@launch
+
+                CalendarEventSyncWorker.schedule(this@BothBubblesApp)
+            } catch (e: Exception) {
+                Timber.w(e, "Error scheduling calendar event sync")
+            }
+        }
     }
 
     /**

@@ -206,6 +206,7 @@ class SettingsDataStore @Inject constructor(
     val initialSyncComplete: Flow<Boolean> get() = syncPrefs.initialSyncComplete
     val syncedChatGuids: Flow<Set<String>> get() = syncPrefs.syncedChatGuids
     val initialSyncMessagesPerChat: Flow<Int> get() = syncPrefs.initialSyncMessagesPerChat
+    val syncOnCellular: Flow<Boolean> get() = syncPrefs.syncOnCellular
     val lastOpenChatGuid: Flow<String?> get() = syncPrefs.lastOpenChatGuid
     val lastOpenChatMergedGuids: Flow<String?> get() = syncPrefs.lastOpenChatMergedGuids
     val lastScrollPosition: Flow<Int> get() = syncPrefs.lastScrollPosition
@@ -216,6 +217,7 @@ class SettingsDataStore @Inject constructor(
     suspend fun setInitialSyncComplete(complete: Boolean) = syncPrefs.setInitialSyncComplete(complete)
     suspend fun markChatSynced(chatGuid: String) = syncPrefs.markChatSynced(chatGuid)
     suspend fun setInitialSyncMessagesPerChat(messagesPerChat: Int) = syncPrefs.setInitialSyncMessagesPerChat(messagesPerChat)
+    suspend fun setSyncOnCellular(enabled: Boolean) = syncPrefs.setSyncOnCellular(enabled)
     suspend fun clearSyncProgress() = syncPrefs.clearSyncProgress()
     suspend fun setLastOpenChat(chatGuid: String?, mergedGuids: String?) = syncPrefs.setLastOpenChat(chatGuid, mergedGuids)
     suspend fun setLastScrollPosition(position: Int, offset: Int) = syncPrefs.setLastScrollPosition(position, offset)

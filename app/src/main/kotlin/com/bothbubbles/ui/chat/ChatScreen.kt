@@ -59,6 +59,7 @@ import com.bothbubbles.ui.components.message.MessageUiModel
 import com.bothbubbles.ui.components.attachment.LocalExoPlayerPool
 import com.bothbubbles.ui.components.dialogs.ContactInfo
 import com.bothbubbles.ui.components.dialogs.ContactQuickActionsPopup
+import com.bothbubbles.ui.components.dialogs.ReelsSetupDialog
 import com.bothbubbles.ui.components.message.AnimatedThreadOverlay
 import com.bothbubbles.ui.components.message.ThreadReplyData
 import com.bothbubbles.ui.components.reels.ReelItem
@@ -503,10 +504,13 @@ fun ChatScreen(
                             state.reelsFeedUnwatchedOnly = unwatchedOnly
                             state.showReelsFeed = true
                         },
+                        onReelsSetupClick = { state.showReelsSetupDialog = true },
                         onLife360MapClick = onLife360MapClick,
                         reelsFeedEnabled = reelsState.isEnabled,
                         hasReelVideos = reelsState.reelItems.isNotEmpty(),
                         unwatchedReelsCount = reelsState.unwatchedCount,
+                        hasSavedContact = chatInfoState.hasSavedContact,
+                        isShortcode = chatInfoState.isShortcode,
                         isBubbleMode = isBubbleMode,
                         onMenuAction = { action ->
                             when (action) {
@@ -763,6 +767,7 @@ fun ChatScreen(
             attachmentDelegate = viewModel.attachment,
             etaSharingDelegate = viewModel.etaSharing,
             effectsDelegate = viewModel.effects,
+            calendarEventsDelegate = viewModel.calendarEvents,
 
             // State objects (still needed at this level)
             chatInfoState = chatInfoState,
@@ -1032,6 +1037,16 @@ fun ChatScreen(
             modifier = Modifier.fillMaxSize()
         )
     }
+
+    // Reels setup dialog - shown when user taps Reels button and feature is not enabled
+    ReelsSetupDialog(
+        visible = state.showReelsSetupDialog,
+        onConfirm = { config ->
+            viewModel.enableReelsWithConfig(config)
+            state.showReelsSetupDialog = false
+        },
+        onDismiss = { state.showReelsSetupDialog = false }
+    )
 
     // Thread overlay - rendered LAST to appear on top of everything including Reels
     val threadBottomPadding = if (state.showReelsFeed) 0.dp else with(LocalDensity.current) { state.bottomBarBaseHeightPx.toDp() }

@@ -48,8 +48,10 @@ import com.bothbubbles.data.local.db.entity.UnifiedChatEntity
 import com.bothbubbles.data.local.db.entity.TombstoneEntity
 import com.bothbubbles.data.local.db.entity.VerifiedCounterpartCheckEntity
 import com.bothbubbles.data.local.db.entity.MessageEditHistoryEntity
+import com.bothbubbles.core.model.entity.CalendarEventOccurrenceEntity
 import com.bothbubbles.core.model.entity.ContactCalendarAssociationEntity
 import com.bothbubbles.core.model.entity.Life360MemberEntity
+import com.bothbubbles.data.local.db.dao.CalendarEventOccurrenceDao
 
 /**
  * Room database for BothBubbles.
@@ -85,9 +87,10 @@ import com.bothbubbles.core.model.entity.Life360MemberEntity
         Life360MemberEntity::class,
         MessageEditHistoryEntity::class,
         ContactCalendarAssociationEntity::class,
-        SocialMediaLinkEntity::class
+        SocialMediaLinkEntity::class,
+        CalendarEventOccurrenceEntity::class
     ],
-    version = 61,
+    version = 63,
     exportSchema = true
 )
 abstract class BothBubblesDatabase : RoomDatabase() {
@@ -117,6 +120,7 @@ abstract class BothBubblesDatabase : RoomDatabase() {
     abstract fun messageEditHistoryDao(): MessageEditHistoryDao
     abstract fun contactCalendarDao(): ContactCalendarDao
     abstract fun socialMediaLinkDao(): SocialMediaLinkDao
+    abstract fun calendarEventOccurrenceDao(): CalendarEventOccurrenceDao
 
     companion object {
         const val DATABASE_NAME = "bothbubbles.db"

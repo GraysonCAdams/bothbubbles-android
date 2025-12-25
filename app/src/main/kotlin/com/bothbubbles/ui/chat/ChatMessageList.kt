@@ -42,6 +42,7 @@ import com.bothbubbles.ui.chat.components.MessageListItem
 import com.bothbubbles.ui.chat.components.MessageListOverlayCallbacks
 import com.bothbubbles.ui.chat.components.MessageListOverlays
 import com.bothbubbles.ui.chat.delegates.ChatAttachmentDelegate
+import com.bothbubbles.ui.chat.delegates.ChatCalendarEventsDelegate
 import com.bothbubbles.ui.chat.delegates.ChatEffectsDelegate
 import com.bothbubbles.ui.chat.delegates.ChatEtaSharingDelegate
 import com.bothbubbles.ui.chat.delegates.ChatOperationsDelegate
@@ -49,6 +50,9 @@ import com.bothbubbles.ui.chat.delegates.ChatSearchDelegate
 import com.bothbubbles.ui.chat.delegates.ChatSendDelegate
 import com.bothbubbles.ui.chat.delegates.ChatSyncDelegate
 import com.bothbubbles.ui.chat.delegates.CursorChatMessageListDelegate
+import com.bothbubbles.ui.components.message.CalendarEventIndicator
+import com.bothbubbles.ui.components.message.CalendarEventItem
+import com.bothbubbles.ui.components.message.ChatListItem
 import com.bothbubbles.util.error.AppError
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -105,6 +109,7 @@ internal object ContentType {
     const val TYPING_INDICATOR = 6
     const val LOADING_SKELETON = 7
     const val BANNER = 8
+    const val CALENDAR_EVENT = 9
 }
 
 /**
@@ -169,6 +174,7 @@ fun ChatMessageList(
     attachmentDelegate: ChatAttachmentDelegate,
     etaSharingDelegate: ChatEtaSharingDelegate,
     effectsDelegate: ChatEffectsDelegate,
+    calendarEventsDelegate: ChatCalendarEventsDelegate,
 
     // State objects (passed by reference - still needed at this level)
     chatInfoState: ChatInfoState,
@@ -214,9 +220,46 @@ fun ChatMessageList(
     val operationsState by operationsDelegate.state.collectAsStateWithLifecycle()
     val effectsState by effectsDelegate.state.collectAsStateWithLifecycle()
     val etaSharingState by etaSharingDelegate.etaSharingState.collectAsStateWithLifecycle()
+    val calendarEvents by calendarEventsDelegate.calendarEvents.collectAsStateWithLifecycle()
     val isLoadingFromServer by messageListDelegate.isLoadingFromServer.collectAsStateWithLifecycle()
     val initialLoadComplete by messageListDelegate.initialLoadComplete.collectAsStateWithLifecycle()
     val autoDownloadEnabled by attachmentDelegate.autoDownloadEnabled.collectAsStateWithLifecycle()
+
+    // Merge messages and calendar events into a unified timeline
+    // Calendar events are sorted by startTime and interleaved with messages by timestamp
+    val timelineItems: List<ChatListItem> = remember(messages, calendarEvents) {
+        if (calendarEvents.isEmpty()) {
+            messages.map { ChatListItem.Message(it) }
+        } else {
+            // Merge messages and calendar events by timestamp (both sorted DESC)
+            val result = mutableListOf<ChatListItem>()
+            var msgIdx = 0
+            var calIdx = 0
+            val sortedCalEvents = calendarEvents.sortedByDescending { it.eventStartTime }
+
+            while (msgIdx < messages.size || calIdx < sortedCalEvents.size) {
+                when {
+                    msgIdx >= messages.size -> {
+                        result.add(ChatListItem.CalendarEvent(sortedCalEvents[calIdx]))
+                        calIdx++
+                    }
+                    calIdx >= sortedCalEvents.size -> {
+                        result.add(ChatListItem.Message(messages[msgIdx]))
+                        msgIdx++
+                    }
+                    messages[msgIdx].dateCreated >= sortedCalEvents[calIdx].eventStartTime -> {
+                        result.add(ChatListItem.Message(messages[msgIdx]))
+                        msgIdx++
+                    }
+                    else -> {
+                        result.add(ChatListItem.CalendarEvent(sortedCalEvents[calIdx]))
+                        calIdx++
+                    }
+                }
+            }
+            result
+        }
+    }
 
     // Cursor pagination state
     val hasMoreMessages by messageListDelegate.hasMoreMessages.collectAsStateWithLifecycle()
@@ -506,6 +549,12 @@ fun ChatMessageList(
                     }
                 }
 
+                // Create lookup from message guid to original index in messages list
+                // This is needed because precomputed maps use message indices
+                val messageGuidToIndex = remember(messages) {
+                    messages.withIndex().associate { it.value.guid to it.index }
+                }
+
                 Box(modifier = Modifier.fillMaxSize()) {
                     // Disable scrolling when tapback overlay is visible
                     val isOverlayVisible = selectedMessageForTapback != null
@@ -541,73 +590,100 @@ fun ChatMessageList(
                         }
 
                         itemsIndexed(
-                            items = messages,
-                            key = { _, message -> message.guid },
-                            contentType = { _, message ->
-                                when {
-                                    message.isReaction -> ContentType.REACTION
-                                    message.isPlacedSticker -> ContentType.STICKER
-                                    message.attachments.isNotEmpty() ->
-                                        if (message.isFromMe) ContentType.OUTGOING_WITH_ATTACHMENT
-                                        else ContentType.INCOMING_WITH_ATTACHMENT
-                                    message.isFromMe -> ContentType.OUTGOING_TEXT
-                                    else -> ContentType.INCOMING_TEXT
+                            items = timelineItems,
+                            key = { _, item ->
+                                when (item) {
+                                    is ChatListItem.Message -> item.message.guid
+                                    is ChatListItem.CalendarEvent -> "cal_${item.event.id}"
+                                    else -> item.key // DateSeparator, TypingIndicator won't be in timelineItems
+                                }
+                            },
+                            contentType = { _, item ->
+                                when (item) {
+                                    is ChatListItem.CalendarEvent -> ContentType.CALENDAR_EVENT
+                                    is ChatListItem.Message -> {
+                                        val message = item.message
+                                        when {
+                                            message.isReaction -> ContentType.REACTION
+                                            message.isPlacedSticker -> ContentType.STICKER
+                                            message.attachments.isNotEmpty() ->
+                                                if (message.isFromMe) ContentType.OUTGOING_WITH_ATTACHMENT
+                                                else ContentType.INCOMING_WITH_ATTACHMENT
+                                            message.isFromMe -> ContentType.OUTGOING_TEXT
+                                            else -> ContentType.INCOMING_TEXT
+                                        }
+                                    }
+                                    else -> item.contentType // DateSeparator, TypingIndicator won't be in timelineItems
                                 }
                             }
-                        ) { index, message ->
-                            // Use derivedStateOf for efficient per-item selection check
-                            val isSelected by remember(message.guid) {
-                                derivedStateOf { message.guid in chatScreenState.selectedMessageGuids }
-                            }
+                        ) { _, item ->
+                            when (item) {
+                                is ChatListItem.CalendarEvent -> {
+                                    CalendarEventIndicator(
+                                        text = item.event.getDisplayText()
+                                    )
+                                }
+                                is ChatListItem.Message -> {
+                                    val message = item.message
+                                    val messageIndex = messageGuidToIndex[message.guid] ?: 0
 
-                            MessageListItem(
-                                message = message,
-                                index = index,
-                                messages = messages,
-                                chatScreenState = chatScreenState,
-                                chatInfoState = chatInfoState,
-                                searchDelegate = searchDelegate,
-                                attachmentDelegate = attachmentDelegate,
-                                etaSharingDelegate = etaSharingDelegate,
-                                effectsDelegate = effectsDelegate,
-                                highlightedMessageGuid = highlightedMessageGuid,
-                                isServerConnected = isServerConnected,
-                                initialLoadComplete = initialLoadComplete,
-                                nextVisibleMessage = nextVisibleMessageMap[index],
-                                lastOutgoingIndex = lastOutgoingIndex,
-                                latestEtaMessageIndex = latestEtaMessageIndex,
-                                showSenderName = showSenderNameMap[index] ?: false,
-                                showAvatar = showAvatarMap[index] ?: false,
-                                selectedMessageForTapback = selectedMessageForTapback,
-                                selectedMessageForRetry = selectedMessageForRetry,
-                                swipingMessageGuid = swipingMessageGuid,
-                                onSelectMessageForTapback = onSelectMessageForTapback,
-                                onSelectMessageForRetry = onSelectMessageForRetry,
-                                onCanRetrySmsUpdate = onCanRetrySmsUpdate,
-                                onSwipingMessageChange = onSwipingMessageChange,
-                                onSelectedBoundsChange = onSelectedBoundsChange,
-                                // Multi-message selection (disabled in bubble mode)
-                                isSelectionMode = !isBubbleMode && chatScreenState.isMessageSelectionMode,
-                                isSelected = isSelected,
-                                onEnterSelectionMode = if (isBubbleMode) { _ -> } else chatScreenState::enterMessageSelectionMode,
-                                onToggleSelection = if (isBubbleMode) { _ -> } else chatScreenState::toggleMessageSelection,
-                                callbacks = MessageItemCallbacks(
-                                    onMediaClick = callbacks.onMediaClick,
-                                    onSetReplyTo = callbacks.onSetReplyTo,
-                                    onScrollToOriginal = callbacks.onScrollToOriginal,
-                                    onLoadThread = callbacks.onLoadThread,
-                                    onCanRetryAsSms = callbacks.onCanRetryAsSms,
-                                    onRetryMessage = callbacks.onRetryMessage,
-                                    onRetryAsSms = callbacks.onRetryAsSms,
-                                    onDeleteMessage = callbacks.onDeleteMessage,
-                                    onBubbleEffectCompleted = callbacks.onBubbleEffectCompleted,
-                                    onClearHighlight = callbacks.onClearHighlight,
-                                    onDownloadAttachment = callbacks.onDownloadAttachment,
-                                    onStopSharingEta = callbacks.onStopSharingEta,
-                                    onAvatarClick = callbacks.onAvatarClick,
-                                    onOpenReelsFeed = callbacks.onOpenReelsFeed
-                                )
-                            )
+                                    // Use derivedStateOf for efficient per-item selection check
+                                    val isSelected by remember(message.guid) {
+                                        derivedStateOf { message.guid in chatScreenState.selectedMessageGuids }
+                                    }
+
+                                    MessageListItem(
+                                        message = message,
+                                        index = messageIndex,
+                                        messages = messages,
+                                        chatScreenState = chatScreenState,
+                                        chatInfoState = chatInfoState,
+                                        searchDelegate = searchDelegate,
+                                        attachmentDelegate = attachmentDelegate,
+                                        etaSharingDelegate = etaSharingDelegate,
+                                        effectsDelegate = effectsDelegate,
+                                        highlightedMessageGuid = highlightedMessageGuid,
+                                        isServerConnected = isServerConnected,
+                                        initialLoadComplete = initialLoadComplete,
+                                        nextVisibleMessage = nextVisibleMessageMap[messageIndex],
+                                        lastOutgoingIndex = lastOutgoingIndex,
+                                        latestEtaMessageIndex = latestEtaMessageIndex,
+                                        showSenderName = showSenderNameMap[messageIndex] ?: false,
+                                        showAvatar = showAvatarMap[messageIndex] ?: false,
+                                        selectedMessageForTapback = selectedMessageForTapback,
+                                        selectedMessageForRetry = selectedMessageForRetry,
+                                        swipingMessageGuid = swipingMessageGuid,
+                                        onSelectMessageForTapback = onSelectMessageForTapback,
+                                        onSelectMessageForRetry = onSelectMessageForRetry,
+                                        onCanRetrySmsUpdate = onCanRetrySmsUpdate,
+                                        onSwipingMessageChange = onSwipingMessageChange,
+                                        onSelectedBoundsChange = onSelectedBoundsChange,
+                                        // Multi-message selection (disabled in bubble mode)
+                                        isSelectionMode = !isBubbleMode && chatScreenState.isMessageSelectionMode,
+                                        isSelected = isSelected,
+                                        onEnterSelectionMode = if (isBubbleMode) { _ -> } else chatScreenState::enterMessageSelectionMode,
+                                        onToggleSelection = if (isBubbleMode) { _ -> } else chatScreenState::toggleMessageSelection,
+                                        callbacks = MessageItemCallbacks(
+                                            onMediaClick = callbacks.onMediaClick,
+                                            onSetReplyTo = callbacks.onSetReplyTo,
+                                            onScrollToOriginal = callbacks.onScrollToOriginal,
+                                            onLoadThread = callbacks.onLoadThread,
+                                            onCanRetryAsSms = callbacks.onCanRetryAsSms,
+                                            onRetryMessage = callbacks.onRetryMessage,
+                                            onRetryAsSms = callbacks.onRetryAsSms,
+                                            onDeleteMessage = callbacks.onDeleteMessage,
+                                            onBubbleEffectCompleted = callbacks.onBubbleEffectCompleted,
+                                            onClearHighlight = callbacks.onClearHighlight,
+                                            onDownloadAttachment = callbacks.onDownloadAttachment,
+                                            onStopSharingEta = callbacks.onStopSharingEta,
+                                            onAvatarClick = callbacks.onAvatarClick,
+                                            onOpenReelsFeed = callbacks.onOpenReelsFeed
+                                        )
+                                    )
+                                }
+                                // DateSeparator, TypingIndicator won't be in timelineItems
+                                else -> Unit
+                            }
                         }
 
                         // Error footer for pagination failures

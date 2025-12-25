@@ -185,12 +185,14 @@ fun SettingsCard(
  * - Actionable subtitles with tappable links
  * - Loading state support for async operations
  * - Contextual help via info button
+ * - Highlight animation for search navigation (pulse effect that fades)
  *
  * @param onDisabledClick Called when user taps a disabled row. Use to show snackbar/toast explaining why.
  * @param subtitleAction Optional action text appended to subtitle as a tappable link (e.g., "Tap to fix")
  * @param onSubtitleActionClick Called when the subtitle action link is tapped
  * @param isLoading When true, shows loading indicator instead of trailing content
  * @param onInfoClick When provided, shows an info icon that triggers this callback (for contextual help)
+ * @param isHighlighted When true, shows a brief pulse highlight effect to draw attention
  */
 @Composable
 fun SettingsMenuItem(
@@ -205,10 +207,26 @@ fun SettingsMenuItem(
     onSubtitleActionClick: (() -> Unit)? = null,
     isLoading: Boolean = false,
     onInfoClick: (() -> Unit)? = null,
+    isHighlighted: Boolean = false,
     trailingContent: @Composable (() -> Unit)? = null
 ) {
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
+
+    // Highlight animation - pulses twice then fades
+    val highlightAlpha = remember { Animatable(0f) }
+    LaunchedEffect(isHighlighted) {
+        if (isHighlighted) {
+            // Pulse animation: fade in, pulse, then fade out
+            highlightAlpha.animateTo(0.15f, tween(200))
+            delay(100)
+            highlightAlpha.animateTo(0.08f, tween(150))
+            delay(100)
+            highlightAlpha.animateTo(0.15f, tween(150))
+            delay(800)
+            highlightAlpha.animateTo(0f, tween(400))
+        }
+    }
 
     // Shake animation state for disabled click feedback
     val shakeOffset = remember { Animatable(0f) }
@@ -353,7 +371,11 @@ fun SettingsMenuItem(
                 }
             ),
         colors = ListItemDefaults.colors(
-            containerColor = Color.Transparent
+            containerColor = if (highlightAlpha.value > 0f) {
+                MaterialTheme.colorScheme.primary.copy(alpha = highlightAlpha.value)
+            } else {
+                Color.Transparent
+            }
         )
     )
 }

@@ -58,7 +58,7 @@ interface UnifiedChatDao {
 
     @Query("""
         SELECT * FROM unified_chats
-        WHERE is_archived = 0 AND date_deleted IS NULL
+        WHERE is_archived = 0 AND date_deleted IS NULL AND latest_message_date IS NOT NULL
         ORDER BY is_pinned DESC, pin_index ASC, latest_message_date DESC
         LIMIT :limit OFFSET :offset
     """)
@@ -104,10 +104,10 @@ interface UnifiedChatDao {
 
     // ==================== Counts ====================
 
-    @Query("SELECT COUNT(*) FROM unified_chats WHERE is_archived = 0 AND date_deleted IS NULL")
+    @Query("SELECT COUNT(*) FROM unified_chats WHERE is_archived = 0 AND date_deleted IS NULL AND latest_message_date IS NOT NULL")
     suspend fun getActiveCount(): Int
 
-    @Query("SELECT COUNT(*) FROM unified_chats WHERE is_archived = 0 AND date_deleted IS NULL")
+    @Query("SELECT COUNT(*) FROM unified_chats WHERE is_archived = 0 AND date_deleted IS NULL AND latest_message_date IS NOT NULL")
     fun observeActiveCount(): Flow<Int>
 
     @Query("SELECT COUNT(*) FROM unified_chats WHERE is_archived = 1 AND date_deleted IS NULL")
@@ -314,7 +314,7 @@ interface UnifiedChatDao {
 
     @Query("""
         SELECT COUNT(*) FROM unified_chats
-        WHERE is_archived = 0 AND date_deleted IS NULL
+        WHERE is_archived = 0 AND date_deleted IS NULL AND latest_message_date IS NOT NULL
         AND (
             (:includeSpam = 1 AND is_spam = 1)
             OR (:includeSpam = 0 AND is_spam = 0)
@@ -330,7 +330,7 @@ interface UnifiedChatDao {
 
     @Query("""
         SELECT id FROM unified_chats
-        WHERE is_archived = 0 AND date_deleted IS NULL
+        WHERE is_archived = 0 AND date_deleted IS NULL AND latest_message_date IS NOT NULL
         AND (
             (:includeSpam = 1 AND is_spam = 1)
             OR (:includeSpam = 0 AND is_spam = 0)

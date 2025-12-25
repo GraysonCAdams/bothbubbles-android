@@ -75,6 +75,9 @@ class ConversationLoadingDelegate @AssistedInject constructor(
      * IMPORTANT: All database operations run on Dispatchers.IO to avoid blocking main thread.
      */
     suspend fun loadInitialConversations(typingChats: Set<String>): LoadResult {
+        val threadId = Thread.currentThread().id
+        Timber.tag("ConvoDebug").w(">>> loadInitialConversations ENTRY [thread=$threadId]")
+
         val loadId = PerformanceProfiler.start("ConversationList.loadInitial")
         _isLoading.value = true
 
@@ -98,7 +101,8 @@ class ConversationLoadingDelegate @AssistedInject constructor(
                 PerformanceProfiler.end(queryId3, "${nonGroupChats.size} chats")
 
                 // DEBUG: Trace group chat loading issue - looking for "Squad Goals" and "Siblings"
-                Timber.tag("ConvoDebug").d("=== INITIAL LOAD DEBUG ===")
+                val threadId = Thread.currentThread().id
+                Timber.tag("ConvoDebug").w("=== INITIAL LOAD DEBUG [thread=$threadId] ===")
                 Timber.tag("ConvoDebug").d("Unified chats total: ${unifiedChats.size}")
 
                 // Check for group unified chats (sourceId contains ";chat" for group chats)
@@ -162,14 +166,15 @@ class ConversationLoadingDelegate @AssistedInject constructor(
                 PerformanceProfiler.end(buildId, "${conversations.size} items")
 
                 // Check if Squad Goals / Siblings made it into the final list
+                val checkThreadId = Thread.currentThread().id
                 val targetInFinal = conversations.filter { conv ->
                     conv.displayName.contains("Squad", ignoreCase = true) ||
                     conv.displayName.contains("Siblings", ignoreCase = true)
                 }
                 if (targetInFinal.isNotEmpty()) {
-                    Timber.tag("ConvoDebug").w("TARGET IN FINAL LIST: ${targetInFinal.map { "${it.displayName}|isGroup=${it.isGroup}|guid=${it.guid.take(30)}" }}")
+                    Timber.tag("ConvoDebug").w("[thread=$checkThreadId] TARGET IN FINAL LIST: ${targetInFinal.map { "${it.displayName}|isGroup=${it.isGroup}|guid=${it.guid.take(30)}" }}")
                 } else {
-                    Timber.tag("ConvoDebug").w("TARGET NOT IN FINAL LIST - total convos: ${conversations.size}, allConvos: ${allConversations.size}")
+                    Timber.tag("ConvoDebug").w("[thread=$checkThreadId] TARGET NOT IN FINAL LIST - total convos: ${conversations.size}, allConvos: ${allConversations.size}")
                     // Check if they're in allConversations but got cut off
                     val targetInAll = allConversations.filter { conv ->
                         conv.displayName.contains("Squad", ignoreCase = true) ||
@@ -221,6 +226,9 @@ class ConversationLoadingDelegate @AssistedInject constructor(
         try {
             // Run all database operations on IO dispatcher
             val result = withContext(Dispatchers.IO) {
+                val threadId = Thread.currentThread().id
+                Timber.tag("ConvoDebug").w("=== REFRESH LOAD [thread=$threadId] totalLoaded=$totalLoaded ===")
+
                 // Re-fetch all loaded unified chats
                 val unifiedChats = unifiedChatRepository.getActiveChats(totalLoaded, 0)
 
@@ -501,6 +509,21 @@ class ConversationLoadingDelegate @AssistedInject constructor(
         for (unifiedChat in unifiedChats) {
             val chatGuids = unifiedChatIdToGuids[unifiedChat.id] ?: listOf(unifiedChat.sourceId)
 
+            // DEBUG: Trace group unified chats specifically
+            val isGroupUnified = unifiedChat.sourceId.contains(";chat")
+            if (isGroupUnified) {
+                val threadId = Thread.currentThread().id
+                val guidsFoundInMap = chatGuids.filter { it in allChatsMap.keys }
+                val guidsNotInMap = chatGuids.filter { it !in allChatsMap.keys }
+                Timber.tag("ConvoDebug").d(
+                    "[thread=$threadId] GROUP UNIFIED processing: id=${unifiedChat.id.take(12)}, sourceId=${unifiedChat.sourceId.take(40)}, " +
+                    "chatGuids=${chatGuids.size}, inMap=${guidsFoundInMap.size}, notInMap=${guidsNotInMap.size}"
+                )
+                if (guidsNotInMap.isNotEmpty()) {
+                    Timber.tag("ConvoDebug").d("  Missing from chatsMap: $guidsNotInMap")
+                }
+            }
+
             val uiModel = unifiedGroupMappingDelegate.unifiedChatToUiModel(
                 unifiedChat = unifiedChat,
                 chatGuids = chatGuids,
@@ -508,6 +531,14 @@ class ConversationLoadingDelegate @AssistedInject constructor(
                 chatsMap = allChatsMap,
                 participantsMap = participantsByChatMap
             )
+
+            // DEBUG: Log if group unified chat returned null uiModel
+            if (isGroupUnified && uiModel == null) {
+                Timber.tag("ConvoDebug").w("GROUP UNIFIED returned NULL uiModel: sourceId=${unifiedChat.sourceId.take(40)}")
+            } else if (isGroupUnified && uiModel != null) {
+                Timber.tag("ConvoDebug").d("GROUP UNIFIED success: ${uiModel.displayName}|guid=${uiModel.guid.take(30)}")
+            }
+
             if (uiModel != null) {
                 conversations.add(uiModel)
             }
@@ -542,6 +573,15 @@ class ConversationLoadingDelegate @AssistedInject constructor(
         // (same contact appears as separate iMessage/SMS chats)
         val (groupConversations, individualChats) = sortedConversations.partition {
             it.isGroup || it.contactKey.isBlank()
+        }
+
+        // DEBUG: Check if group chats ended up in individualChats (wrong partition)
+        val mispartitionedGroups = individualChats.filter { it.guid.contains(";chat") }
+        if (mispartitionedGroups.isNotEmpty()) {
+            Timber.tag("ConvoDebug").w(
+                "MISPARTITIONED GROUPS: ${mispartitionedGroups.size} chats with ';chat' in guid are in individualChats: " +
+                "${mispartitionedGroups.take(5).map { "${it.displayName}|isGroup=${it.isGroup}|key=${it.contactKey}" }}"
+            )
         }
 
         val deduplicatedIndividualChats = individualChats

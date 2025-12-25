@@ -1,5 +1,7 @@
 package com.bothbubbles.ui.chat.delegates
 
+import android.app.Application
+import android.text.format.DateFormat
 import androidx.lifecycle.SavedStateHandle
 import com.bothbubbles.core.network.api.dto.MessageDto
 import com.bothbubbles.data.local.db.dao.MessageEditHistoryDao
@@ -92,6 +94,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class CursorChatMessageListDelegate @AssistedInject constructor(
+    private val application: Application,
     private val messageRepository: MessageRepository,
     private val chatRepository: ChatRepository,
     private val attachmentRepository: AttachmentRepository,
@@ -141,6 +144,10 @@ class CursorChatMessageListDelegate @AssistedInject constructor(
         private val DISPLAY_DATE_FORMAT_MONTH_DAY = DateTimeFormatter.ofPattern("MMMM d", Locale.getDefault())
         private val DISPLAY_DATE_FORMAT_FULL = DateTimeFormatter.ofPattern("MMMM d, yyyy", Locale.getDefault())
     }
+
+    // Helper to check system 24-hour format preference
+    private val is24Hour: Boolean
+        get() = DateFormat.is24HourFormat(application)
 
     // ============================================================================
     // STATE - QUERY LIMIT

@@ -71,7 +71,7 @@ interface BothBubblesApi {
     ): Response<ApiResponse<ChatDto>>
 
     @GET("api/v1/chat/count")
-    suspend fun getChatCount(): Response<ApiResponse<Int>>
+    suspend fun getChatCount(): Response<ApiResponse<ChatCountDto>>
 
     // ===== Message Count =====
 

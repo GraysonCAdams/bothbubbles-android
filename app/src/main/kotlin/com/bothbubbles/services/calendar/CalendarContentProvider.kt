@@ -146,6 +146,71 @@ class CalendarContentProvider @Inject constructor(
     }
 
     /**
+     * Get events within a specific time range (for retroactive sync).
+     *
+     * Used to populate past calendar events when opening a conversation
+     * if sync hasn't run recently.
+     *
+     * @param calendarId The calendar to query
+     * @param startTime Range start (epoch milliseconds)
+     * @param endTime Range end (epoch milliseconds)
+     * @return List of events in the time range, sorted by start time
+     */
+    suspend fun getEventsInRange(
+        calendarId: Long,
+        startTime: Long,
+        endTime: Long
+    ): List<CalendarEvent> = withContext(Dispatchers.IO) {
+        if (!permissionStateMonitor.hasCalendarPermission()) {
+            Timber.tag(TAG).d("Calendar permission not granted")
+            return@withContext emptyList()
+        }
+
+        val events = mutableListOf<CalendarEvent>()
+
+        try {
+            val instancesUri = CalendarContract.Instances.CONTENT_URI.buildUpon()
+                .appendPath(startTime.toString())
+                .appendPath(endTime.toString())
+                .build()
+
+            contentResolver.query(
+                instancesUri,
+                arrayOf(
+                    CalendarContract.Instances.EVENT_ID,
+                    CalendarContract.Instances.TITLE,
+                    CalendarContract.Instances.BEGIN,
+                    CalendarContract.Instances.END,
+                    CalendarContract.Instances.ALL_DAY,
+                    CalendarContract.Instances.EVENT_LOCATION,
+                    CalendarContract.Instances.CALENDAR_COLOR
+                ),
+                "${CalendarContract.Instances.CALENDAR_ID} = ?",
+                arrayOf(calendarId.toString()),
+                "${CalendarContract.Instances.BEGIN} ASC"
+            )?.use { cursor ->
+                while (cursor.moveToNext()) {
+                    events.add(
+                        CalendarEvent(
+                            id = cursor.getLong(0),
+                            title = cursor.getString(1) ?: "No title",
+                            startTime = cursor.getLong(2),
+                            endTime = cursor.getLong(3),
+                            isAllDay = cursor.getInt(4) == 1,
+                            location = cursor.getString(5),
+                            color = cursor.getInt(6).takeIf { !cursor.isNull(6) }
+                        )
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            Timber.tag(TAG).e(e, "Failed to query events in range for calendar $calendarId")
+        }
+
+        events
+    }
+
+    /**
      * Get the current or next event for a calendar.
      * Efficient single-event query for chat header display.
      *

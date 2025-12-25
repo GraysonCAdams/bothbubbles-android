@@ -35,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
+import timber.log.Timber
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -48,6 +49,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bothbubbles.services.categorization.MessageCategory
 import com.bothbubbles.ui.components.dialogs.ContactInfo
 import com.bothbubbles.ui.components.dialogs.ContactQuickActionsPopup
+import com.bothbubbles.ui.components.dialogs.FetchAllMessagesDialog
 import com.bothbubbles.ui.components.dialogs.SnoozeDurationDialog
 import com.bothbubbles.ui.components.conversation.SwipeActionType
 import com.bothbubbles.ui.conversations.components.BatchActionConfirmationDialog
@@ -198,16 +200,19 @@ fun ConversationsScreen(
         }
     }
 
-    // Auto-scroll to top when new conversations are created
-    val conversationCount = uiState.conversations.size
-    var previousConversationCount by remember { mutableIntStateOf(conversationCount) }
+    // Auto-scroll to top when a NEW conversation is created (not pagination)
+    // We detect this by checking if the FIRST item changed, not just count increased
+    val firstConversationGuid = uiState.conversations.firstOrNull()?.guid
+    var previousFirstGuid by remember { mutableStateOf(firstConversationGuid) }
 
-    LaunchedEffect(conversationCount) {
-        // Only scroll if a new conversation was added (count increased)
-        if (conversationCount > previousConversationCount && previousConversationCount > 0) {
+    LaunchedEffect(firstConversationGuid) {
+        // Only scroll if the first conversation changed (actual new conversation at top)
+        // Skip if previousFirstGuid is null (initial load) or if new first is null (empty state)
+        if (previousFirstGuid != null && firstConversationGuid != null &&
+            firstConversationGuid != previousFirstGuid) {
             listState.animateScrollToItem(0)
         }
-        previousConversationCount = conversationCount
+        previousFirstGuid = firstConversationGuid
     }
 
     // Scroll to position when a chat is pinned
@@ -502,7 +507,9 @@ fun ConversationsScreen(
                     // Navigate to chat but keep search state - back will return to search
                     onConversationClick(guid, mergedGuids)
                 },
-                focusRequester = focusRequester
+                focusRequester = focusRequester,
+                initialSyncComplete = uiState.initialSyncComplete,
+                onFetchAllMessagesClick = viewModel::showFetchAllMessagesDialog
             )
 
             LaunchedEffect(Unit) {
@@ -598,6 +605,15 @@ fun ConversationsScreen(
                 onDismiss = { pendingBatchAction = null }
             )
         }
+
+        // Fetch all messages dialog (shown from search when initial sync not complete)
+        FetchAllMessagesDialog(
+            visible = uiState.showFetchAllMessagesDialog,
+            syncOnCellular = uiState.syncOnCellular,
+            onSyncOnCellularChange = viewModel::setSyncOnCellular,
+            onConfirm = viewModel::confirmFetchAllMessages,
+            onDismiss = viewModel::dismissFetchAllMessagesDialog
+        )
 
         // Scroll to top button - slides up from bottom when scrolled
         androidx.compose.animation.AnimatedVisibility(

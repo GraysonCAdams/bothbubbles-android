@@ -9,6 +9,9 @@ import com.bothbubbles.core.model.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.ChatHandleCrossRef
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
+import com.bothbubbles.data.repository.SmsContentProviderHelpers.determineChatGuidForMms
+import com.bothbubbles.data.repository.SmsContentProviderHelpers.determineChatGuidForSms
+import com.bothbubbles.data.repository.SmsContentProviderHelpers.getValidMmsRecipients
 import com.bothbubbles.data.repository.SmsContentProviderHelpers.isValidPhoneAddress
 import com.bothbubbles.data.repository.SmsContentProviderHelpers.phonesMatch
 import com.bothbubbles.data.repository.SmsContentProviderHelpers.toMessageEntity
@@ -66,123 +69,173 @@ class SmsImporter(
     }
 
     /**
-     * Import a single SMS thread
+     * Import a single SMS thread.
+     * Only imports threads that have at least one message - empty threads are skipped.
+     *
+     * IMPORTANT: Uses per-message chat_guid determination instead of thread-level addresses.
+     * This fixes the bug where 1:1 SMS messages were incorrectly assigned to group chats
+     * when the thread contained both 1:1 and group messages.
      */
     suspend fun importThread(thread: SmsThread) {
-        val rawAddresses = thread.recipientAddresses
-        if (rawAddresses.isEmpty()) return
+        // IMPORTANT: Check for messages FIRST before creating any records
+        // Skip empty threads entirely - don't create chats without messages
+        val smsMessages = smsContentProvider.getSmsMessages(thread.threadId, limit = 1)
+        val mmsMessages = smsContentProvider.getMmsMessages(thread.threadId, limit = 1)
+        val latestSms = smsMessages.firstOrNull()
+        val latestMms = mmsMessages.firstOrNull()
 
-        // Filter to valid phone numbers and normalize
-        val addresses = rawAddresses
-            .filter { isValidPhoneAddress(it) }
-            .map { PhoneAndCodeParsingUtils.normalizePhoneNumber(it) }
-            .filter { it.isNotBlank() }
-            .distinct()
-
-        if (addresses.isEmpty()) {
-            Timber.d("Skipping thread ${thread.threadId} - no valid phone addresses")
+        if (latestSms == null && latestMms == null) {
+            Timber.d("Skipping thread ${thread.threadId} - no messages found")
             return
         }
 
-        val isGroup = addresses.size > 1
-        val chatGuid = if (isGroup) {
-            "mms;-;${addresses.sorted().joinToString(",")}"
-        } else {
-            "sms;-;${addresses.first()}"
+        // Process each message with its per-message chat_guid
+        // This is the key fix: we determine chat_guid from the MESSAGE's address/addresses,
+        // not from thread-level addresses which can be incorrect for mixed threads
+
+        // Process latest SMS if present
+        latestSms?.let { sms ->
+            val smsChatGuid = determineChatGuidForSms(sms.address)
+            if (smsChatGuid != null) {
+                ensureChatExists(smsChatGuid, sms.address, sms.date)
+                val messageEntity = sms.toMessageEntity(smsChatGuid)
+                messageDao.insertOrUpdateMessage(messageEntity)
+
+                // Update unified chat for 1:1 SMS
+                updateUnifiedChatForMessage(smsChatGuid, sms.address, sms.date, messageEntity, thread.snippet)
+            } else {
+                Timber.d("Skipping SMS ${sms.id} - invalid address '${sms.address}'")
+            }
         }
 
-        // Create or update chat
-        val existingChat = chatDao.getChatByGuid(chatGuid)
-        if (existingChat == null) {
-            val chat = ChatEntity(
-                guid = chatGuid,
-                chatIdentifier = if (isGroup) null else addresses.first(),
-                displayName = null, // Will be resolved from contacts
-                isGroup = isGroup,
-                latestMessageDate = thread.lastMessageDate
-            )
-            chatDao.insertChat(chat)
-        }
+        // Process latest MMS if present (only if it's newer than SMS or SMS doesn't exist)
+        latestMms?.let { mms ->
+            // Only process MMS if it's the latest message or no SMS exists
+            val shouldProcessMms = latestSms == null || mms.date >= latestSms.date
 
-        // Create handles for addresses and link to chat
-        // Use upsertHandle to get existing handle ID instead of creating duplicates
-        // (insertHandle with REPLACE would delete existing handles, breaking cross-refs)
-        addresses.filter { it.isNotBlank() }.forEach { address ->
-            // Look up contact info from device contacts
-            val contactName = androidContactsService.getContactDisplayName(address)
-            val contactPhotoUri = androidContactsService.getContactPhotoUri(address)
-            val formattedAddress = PhoneNumberFormatter.format(address)
+            if (shouldProcessMms) {
+                val mmsChatGuid = determineChatGuidForMms(mms.addresses)
+                if (mmsChatGuid != null) {
+                    // Get valid recipient addresses as strings for chat creation
+                    val validRecipients = getValidMmsRecipients(mms.addresses)
+                    ensureChatExistsForMms(mmsChatGuid, validRecipients, mms.date)
+                    val messageEntity = mms.toMessageEntity(mmsChatGuid)
+                    messageDao.insertOrUpdateMessage(messageEntity)
 
-            val handle = HandleEntity(
-                address = address,
-                formattedAddress = formattedAddress,
-                service = "SMS",
-                cachedDisplayName = contactName,
-                cachedAvatarPath = contactPhotoUri
-            )
-            val handleId = handleDao.upsertHandle(handle)
-            // Link handle to chat (required for getParticipantsForChat to work)
-            chatDao.insertChatHandleCrossRef(ChatHandleCrossRef(chatGuid, handleId))
-        }
-
-        // For single contacts (not groups), link to unified chat
-        val validAddresses = addresses.filter { it.isNotBlank() }
-        if (!isGroup && validAddresses.isNotEmpty()) {
-            val normalizedPhone = validAddresses.first()
-            linkChatToUnifiedChat(chatGuid, normalizedPhone)
-        }
-
-        // Import the most recent message so the badge displays correctly in conversation list
-        importLatestMessageForThread(thread.threadId, chatGuid, isGroup)
-
-        // Update unified chat's latestMessageDate if applicable
-        if (!isGroup && validAddresses.isNotEmpty()) {
-            val normalizedPhone = validAddresses.first()
-            val unifiedChat = unifiedChatDao.getByNormalizedAddress(normalizedPhone)
-            if (unifiedChat != null) {
-                // Update latestMessageDate if this thread's message is newer
-                unifiedChatRepository.updateLatestMessageIfNewer(
-                    id = unifiedChat.id,
-                    date = thread.lastMessageDate,
-                    text = thread.snippet,
-                    guid = null,
-                    isFromMe = false,
-                    hasAttachments = false,
-                    source = "LOCAL_SMS"
-                )
+                    // Update unified chat for 1:1 MMS (groups don't use unified chats for merging)
+                    if (!mmsChatGuid.startsWith("mms;-;")) {
+                        val primaryAddress = validRecipients.firstOrNull()
+                        if (primaryAddress != null) {
+                            updateUnifiedChatForMessage(mmsChatGuid, primaryAddress, mms.date, messageEntity, thread.snippet)
+                        }
+                    }
+                } else {
+                    Timber.d("Skipping MMS ${mms.id} - no valid addresses")
+                }
             }
         }
     }
 
     /**
-     * Import the most recent message from an SMS/MMS thread.
-     * This ensures the conversation list can display the correct message source badge.
+     * Ensure a chat record exists for a 1:1 SMS conversation.
      */
-    private suspend fun importLatestMessageForThread(threadId: Long, chatGuid: String, isGroup: Boolean) {
-        // First try SMS (more common)
-        val smsMessages = smsContentProvider.getSmsMessages(threadId, limit = 1)
-        val mmsMessages = smsContentProvider.getMmsMessages(threadId, limit = 1)
+    private suspend fun ensureChatExists(chatGuid: String, address: String, messageDate: Long) {
+        val normalizedAddress = PhoneAndCodeParsingUtils.normalizePhoneNumber(address)
+        if (normalizedAddress.isBlank()) return
 
-        // Find the most recent message between SMS and MMS
-        val latestSms = smsMessages.firstOrNull()
-        val latestMms = mmsMessages.firstOrNull()
-
-        val latestMessage: MessageEntity? = when {
-            latestSms != null && latestMms != null -> {
-                if (latestSms.date >= latestMms.date) {
-                    latestSms.toMessageEntity(chatGuid)
-                } else {
-                    latestMms.toMessageEntity(chatGuid)
-                }
-            }
-            latestSms != null -> latestSms.toMessageEntity(chatGuid)
-            latestMms != null -> latestMms.toMessageEntity(chatGuid)
-            else -> null
+        val existingChat = chatDao.getChatByGuid(chatGuid)
+        if (existingChat == null) {
+            val chat = ChatEntity(
+                guid = chatGuid,
+                chatIdentifier = normalizedAddress,
+                displayName = null,
+                isGroup = false,
+                latestMessageDate = messageDate
+            )
+            chatDao.insertChat(chat)
         }
 
-        // Insert the message if we found one (upsert to avoid duplicates)
-        latestMessage?.let { msg ->
-            messageDao.insertOrUpdateMessage(msg)
+        // Create handle and link to chat
+        createAndLinkHandle(chatGuid, normalizedAddress)
+    }
+
+    /**
+     * Ensure a chat record exists for an MMS conversation (1:1 or group).
+     */
+    private suspend fun ensureChatExistsForMms(chatGuid: String, addresses: List<String>, messageDate: Long) {
+        val validAddresses = addresses
+            .filter { isValidPhoneAddress(it) }
+            .map { PhoneAndCodeParsingUtils.normalizePhoneNumber(it) }
+            .filter { it.isNotBlank() }
+            .distinct()
+
+        if (validAddresses.isEmpty()) return
+
+        val isGroup = validAddresses.size > 1
+
+        val existingChat = chatDao.getChatByGuid(chatGuid)
+        if (existingChat == null) {
+            val chat = ChatEntity(
+                guid = chatGuid,
+                chatIdentifier = if (isGroup) null else validAddresses.first(),
+                displayName = null,
+                isGroup = isGroup,
+                latestMessageDate = messageDate
+            )
+            chatDao.insertChat(chat)
+        }
+
+        // Create handles and link to chat
+        validAddresses.forEach { address ->
+            createAndLinkHandle(chatGuid, address)
+        }
+    }
+
+    /**
+     * Create a handle entity and link it to a chat.
+     */
+    private suspend fun createAndLinkHandle(chatGuid: String, normalizedAddress: String) {
+        val contactName = androidContactsService.getContactDisplayName(normalizedAddress)
+        val contactPhotoUri = androidContactsService.getContactPhotoUri(normalizedAddress)
+        val formattedAddress = PhoneNumberFormatter.format(normalizedAddress)
+
+        val handle = HandleEntity(
+            address = normalizedAddress,
+            formattedAddress = formattedAddress,
+            service = "SMS",
+            cachedDisplayName = contactName,
+            cachedAvatarPath = contactPhotoUri
+        )
+        val handleId = handleDao.upsertHandle(handle)
+        chatDao.insertChatHandleCrossRef(ChatHandleCrossRef(chatGuid, handleId))
+    }
+
+    /**
+     * Update unified chat for a 1:1 message.
+     */
+    private suspend fun updateUnifiedChatForMessage(
+        chatGuid: String,
+        normalizedAddress: String,
+        messageDate: Long,
+        messageEntity: MessageEntity,
+        threadSnippet: String?
+    ) {
+        // Link chat to unified chat
+        linkChatToUnifiedChat(chatGuid, normalizedAddress)
+
+        // Update unified chat's latest message info
+        val unifiedChat = unifiedChatDao.getByNormalizedAddress(normalizedAddress)
+        if (unifiedChat != null) {
+            val snippet = messageEntity.text ?: threadSnippet
+            unifiedChatRepository.updateLatestMessageIfNewer(
+                id = unifiedChat.id,
+                date = messageDate,
+                text = snippet,
+                guid = messageEntity.guid,
+                isFromMe = messageEntity.isFromMe,
+                hasAttachments = messageEntity.hasAttachments,
+                source = "LOCAL_SMS"
+            )
         }
     }
 
@@ -267,8 +320,12 @@ class SmsImporter(
     }
 
     /**
-     * Import messages for a specific chat
-     * @param chatGuid The chat GUID
+     * Import messages for a specific chat/thread.
+     *
+     * IMPORTANT: Uses per-message chat_guid determination instead of the passed-in chatGuid.
+     * This fixes the bug where messages in mixed threads were assigned incorrect chat_guids.
+     *
+     * @param chatGuid The original chat GUID (used to find thread, but NOT for message assignment)
      * @param limit Maximum number of messages to import
      */
     suspend fun importMessagesForChat(
@@ -282,30 +339,43 @@ class SmsImporter(
 
             var imported = 0
 
-            // Import SMS messages
+            // Import SMS messages with per-message chat_guid
             val smsMessages = smsContentProvider.getSmsMessages(threadId, limit = limit)
             smsMessages.forEach { sms ->
                 val guid = "sms-${sms.id}"
                 if (messageDao.getMessageByGuid(guid) == null) {
-                    val entity = sms.toMessageEntity(chatGuid)
+                    // Determine the correct chat_guid from THIS message's address
+                    val perMessageChatGuid = determineChatGuidForSms(sms.address) ?: return@forEach
+
+                    // Ensure the chat exists for this message
+                    ensureChatExists(perMessageChatGuid, sms.address, sms.date)
+
+                    val entity = sms.toMessageEntity(perMessageChatGuid)
                     messageDao.insertMessage(entity)
                     imported++
                 }
             }
 
-            // Import MMS messages
+            // Import MMS messages with per-message chat_guid
             val mmsMessages = smsContentProvider.getMmsMessages(threadId, limit = limit)
             mmsMessages.forEach { mms ->
                 val guid = "mms-${mms.id}"
                 if (messageDao.getMessageByGuid(guid) == null) {
-                    val entity = mms.toMessageEntity(chatGuid)
+                    // Determine the correct chat_guid from THIS message's addresses
+                    val perMessageChatGuid = determineChatGuidForMms(mms.addresses) ?: return@forEach
+
+                    // Ensure the chat exists for this message
+                    val validRecipients = getValidMmsRecipients(mms.addresses)
+                    ensureChatExistsForMms(perMessageChatGuid, validRecipients, mms.date)
+
+                    val entity = mms.toMessageEntity(perMessageChatGuid)
 
                     // Check for duplicate SMS message with matching content and timestamp
                     // This prevents the same message from appearing twice when recorded as both SMS and MMS
                     val textContent = entity.text
                     if (textContent != null) {
                         val matchingMessage = messageDao.findMatchingMessage(
-                            chatGuid = chatGuid,
+                            chatGuid = perMessageChatGuid,
                             text = textContent,
                             isFromMe = entity.isFromMe,
                             dateCreated = entity.dateCreated,

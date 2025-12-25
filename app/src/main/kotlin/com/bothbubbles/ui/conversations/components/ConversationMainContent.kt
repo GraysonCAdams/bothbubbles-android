@@ -42,7 +42,6 @@ import com.bothbubbles.ui.conversations.EmptyFilterState
 import com.bothbubbles.ui.conversations.PinnedDragOverlay
 import com.bothbubbles.ui.conversations.delegates.SelectionState
 import com.bothbubbles.ui.components.conversation.SwipeConfig
-import timber.log.Timber
 
 /**
  * Main content area for conversations list.

@@ -25,8 +25,8 @@ fun ScrollToTopButton(
         onClick = onClick,
         modifier = modifier.size(48.dp),
         shape = CircleShape,
-        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-        contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+        containerColor = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
         elevation = FloatingActionButtonDefaults.elevation(
             defaultElevation = 2.dp,
             pressedElevation = 4.dp

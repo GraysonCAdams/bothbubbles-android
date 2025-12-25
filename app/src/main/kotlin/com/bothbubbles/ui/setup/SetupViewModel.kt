@@ -72,7 +72,6 @@ class SetupViewModel @Inject constructor(
             userPhoneNumber = smsSetup.userPhoneNumber,
             // Sync
             messagesPerChat = sync.messagesPerChat,
-            skipEmptyChats = sync.skipEmptyChats,
             isSyncing = sync.isSyncing,
             syncProgress = sync.syncProgress,
             isSyncComplete = sync.isSyncComplete,
@@ -150,8 +149,6 @@ class SetupViewModel @Inject constructor(
 
     // ===== Sync =====
 
-    fun updateSkipEmptyChats(skip: Boolean) = syncDelegate.updateSkipEmptyChats(skip)
-
     fun completeSetupWithoutSync() = syncDelegate.completeSetupWithoutSync()
 
     fun startSync() = syncDelegate.startSync()
@@ -207,7 +204,6 @@ data class SetupUiState(
 
     // Sync settings (messagesPerChat is fixed for Signal-style pagination)
     val messagesPerChat: Int = 500,  // Optimal for on-demand pagination - fetch more when scrolling
-    val skipEmptyChats: Boolean = true,
     val isSyncing: Boolean = false,
     val syncProgress: Float = 0f,
     val isSyncComplete: Boolean = false,

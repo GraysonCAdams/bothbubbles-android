@@ -700,6 +700,39 @@ class ChatReelsDelegate @Inject constructor(
     }
 
     /**
+     * Enables the Reels feature with the given configuration.
+     * Sets all relevant preferences and triggers a reload of reels state.
+     *
+     * @param includeVideoAttachments Include regular video attachments in Reels
+     * @param includeTikToks Enable TikTok video downloading
+     * @param includeInstagrams Enable Instagram video downloading
+     * @param downloadOnCellular Allow downloading over cellular data
+     */
+    fun enableReels(
+        includeVideoAttachments: Boolean,
+        includeTikToks: Boolean,
+        includeInstagrams: Boolean,
+        downloadOnCellular: Boolean
+    ) {
+        scope.launch {
+            // Set all the preferences
+            featurePreferences.setReelsFeedEnabled(true)
+            featurePreferences.setReelsIncludeVideoAttachments(includeVideoAttachments)
+            featurePreferences.setTiktokDownloaderEnabled(includeTikToks)
+            featurePreferences.setInstagramDownloaderEnabled(includeInstagrams)
+            featurePreferences.setSocialMediaDownloadOnCellularEnabled(downloadOnCellular)
+
+            // If TikTok or Instagram is enabled, also enable background downloading
+            if (includeTikToks || includeInstagrams) {
+                featurePreferences.setSocialMediaBackgroundDownloadEnabled(true)
+            }
+
+            // Reload reels state to reflect new settings
+            loadReelsState()
+        }
+    }
+
+    /**
      * Checks if there are any reel videos (cached or pending) for this chat.
      */
     fun hasReelVideos(): Boolean = _state.value.reelItems.isNotEmpty()

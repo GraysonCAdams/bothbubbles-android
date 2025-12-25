@@ -71,6 +71,16 @@ import com.bothbubbles.ui.settings.storage.StorageContent
 import com.bothbubbles.ui.settings.sync.SyncSettingsContent
 import com.bothbubbles.ui.settings.templates.QuickReplyTemplatesContent
 import com.bothbubbles.ui.settings.eta.EtaSharingSettingsContent
+import com.bothbubbles.ui.settings.media.MediaContentScreen
+import com.bothbubbles.ui.settings.calendar.CalendarSettingsContent
+import com.bothbubbles.ui.settings.search.SettingsSearchResults
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxWidth
 
 /**
  * Settings panel that slides in from the right.
@@ -85,6 +95,10 @@ fun SettingsPanel(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val navigator = rememberSettingsPanelNavigator()
+
+    // Sync settings dialog state
+    var showCleanSyncDialog by remember { mutableStateOf(false) }
+    var showDisconnectDialog by remember { mutableStateOf(false) }
 
     // Handle system back button
     BackHandler(enabled = true) {
@@ -117,6 +131,8 @@ fun SettingsPanel(
         SettingsPanelPage.About -> "About"
         SettingsPanelPage.OpenSourceLicenses -> "Open source licenses"
         SettingsPanelPage.Storage -> "Storage"
+        SettingsPanelPage.MediaContent -> "Media & content"
+        SettingsPanelPage.Calendar -> "Calendar integrations"
     }
 
     // MD3: Use surfaceContainerLow for panel to distinguish from main content
@@ -131,7 +147,36 @@ fun SettingsPanel(
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
             topBar = {
                 TopAppBar(
-                    title = { Text(title) },
+                    title = {
+                        if (navigator.isSearchActive) {
+                            // Search input field
+                            BasicTextField(
+                                value = navigator.searchQuery,
+                                onValueChange = navigator::updateSearchQuery,
+                                modifier = Modifier.fillMaxWidth(),
+                                textStyle = TextStyle(
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    fontSize = 16.sp
+                                ),
+                                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                singleLine = true,
+                                decorationBox = { innerTextField ->
+                                    Box {
+                                        if (navigator.searchQuery.isEmpty()) {
+                                            Text(
+                                                text = "Search settings",
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                fontSize = 16.sp
+                                            )
+                                        }
+                                        innerTextField()
+                                    }
+                                }
+                            )
+                        } else {
+                            Text(title)
+                        }
+                    },
                     navigationIcon = {
                         if (navigator.canGoBack()) {
                             IconButton(onClick = { navigator.navigateBack() }) {
@@ -143,6 +188,25 @@ fun SettingsPanel(
                         }
                     },
                     actions = {
+                        // Search icon - only on main page when not searching
+                        if (!navigator.isSearchActive && navigator.currentPage == SettingsPanelPage.Main) {
+                            IconButton(onClick = navigator::toggleSearch) {
+                                Icon(
+                                    Icons.Default.Search,
+                                    contentDescription = "Search settings"
+                                )
+                            }
+                        }
+                        // Clear button when searching with text
+                        if (navigator.isSearchActive && navigator.searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { navigator.updateSearchQuery("") }) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "Clear search"
+                                )
+                            }
+                        }
+                        // Close settings button
                         IconButton(onClick = onClose) {
                             Icon(
                                 Icons.Default.Close,
@@ -233,30 +297,42 @@ fun SettingsPanel(
             ) { page ->
                 when (page) {
                     SettingsPanelPage.Main -> {
-                        SettingsContent(
-                            modifier = Modifier.fillMaxSize(),
-                            uiState = uiState,
-                            onServerSettingsClick = { navigator.navigateTo(SettingsPanelPage.Server) },
-                            onArchivedClick = { navigator.navigateTo(SettingsPanelPage.Archived) },
-                            onBlockedClick = { navigator.navigateTo(SettingsPanelPage.Blocked) },
-                            onSpamClick = { navigator.navigateTo(SettingsPanelPage.Spam) },
-                            onCategorizationClick = { navigator.navigateTo(SettingsPanelPage.Categorization) },
-                            onSyncSettingsClick = { navigator.navigateTo(SettingsPanelPage.Sync) },
-                            onExportClick = { navigator.navigateTo(SettingsPanelPage.Export) },
-                            onSmsSettingsClick = { navigator.navigateTo(SettingsPanelPage.Sms) },
-                            onNotificationsClick = { navigator.navigateTo(SettingsPanelPage.Notifications) },
-                            onSwipeSettingsClick = { navigator.navigateTo(SettingsPanelPage.Swipe) },
-                            onEffectsSettingsClick = { navigator.navigateTo(SettingsPanelPage.Effects) },
-                            onImageQualityClick = { navigator.navigateTo(SettingsPanelPage.ImageQuality) },
-                            onTemplatesClick = { navigator.navigateTo(SettingsPanelPage.Templates) },
-                            onAutoResponderClick = { navigator.navigateTo(SettingsPanelPage.AutoResponder) },
-                            onEtaSharingClick = { navigator.navigateTo(SettingsPanelPage.EtaSharing) },
-                            onLife360Click = { navigator.navigateTo(SettingsPanelPage.Life360) },
-                            onSocialMediaClick = { navigator.navigateTo(SettingsPanelPage.SocialMedia) },
-                            onStorageClick = { navigator.navigateTo(SettingsPanelPage.Storage) },
-                            onAboutClick = { navigator.navigateTo(SettingsPanelPage.About) },
-                            viewModel = viewModel
-                        )
+                        if (navigator.isSearchActive) {
+                            // Show search results when search is active
+                            SettingsSearchResults(
+                                results = navigator.searchResults,
+                                query = navigator.searchQuery,
+                                onResultClick = navigator::navigateFromSearch,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            SettingsContent(
+                                modifier = Modifier.fillMaxSize(),
+                                uiState = uiState,
+                                onServerSettingsClick = { navigator.navigateTo(SettingsPanelPage.Server) },
+                                onArchivedClick = { navigator.navigateTo(SettingsPanelPage.Archived) },
+                                onBlockedClick = { navigator.navigateTo(SettingsPanelPage.Blocked) },
+                                onSpamClick = { navigator.navigateTo(SettingsPanelPage.Spam) },
+                                onCategorizationClick = { navigator.navigateTo(SettingsPanelPage.Categorization) },
+                                onSyncSettingsClick = { navigator.navigateTo(SettingsPanelPage.Sync) },
+                                onExportClick = { navigator.navigateTo(SettingsPanelPage.Export) },
+                                onSmsSettingsClick = { navigator.navigateTo(SettingsPanelPage.Sms) },
+                                onNotificationsClick = { navigator.navigateTo(SettingsPanelPage.Notifications) },
+                                onSwipeSettingsClick = { navigator.navigateTo(SettingsPanelPage.Swipe) },
+                                onEffectsSettingsClick = { navigator.navigateTo(SettingsPanelPage.Effects) },
+                                onImageQualityClick = { navigator.navigateTo(SettingsPanelPage.ImageQuality) },
+                                onTemplatesClick = { navigator.navigateTo(SettingsPanelPage.Templates) },
+                                onAutoResponderClick = { navigator.navigateTo(SettingsPanelPage.AutoResponder) },
+                                onEtaSharingClick = { navigator.navigateTo(SettingsPanelPage.EtaSharing) },
+                                onLife360Click = { navigator.navigateTo(SettingsPanelPage.Life360) },
+                                onSocialMediaClick = { navigator.navigateTo(SettingsPanelPage.SocialMedia) },
+                                onStorageClick = { navigator.navigateTo(SettingsPanelPage.Storage) },
+                                onAboutClick = { navigator.navigateTo(SettingsPanelPage.About) },
+                                onMediaContentClick = { navigator.navigateTo(SettingsPanelPage.MediaContent) },
+                                onCalendarClick = { navigator.navigateTo(SettingsPanelPage.Calendar) },
+                                viewModel = viewModel
+                            )
+                        }
                     }
                     SettingsPanelPage.Server -> {
                         ServerSettingsContent()
@@ -279,7 +355,12 @@ fun SettingsPanel(
                         CategorizationSettingsContent()
                     }
                     SettingsPanelPage.Sync -> {
-                        SyncSettingsContent()
+                        SyncSettingsContent(
+                            showCleanSyncDialog = showCleanSyncDialog,
+                            onShowCleanSyncDialog = { showCleanSyncDialog = it },
+                            showDisconnectDialog = showDisconnectDialog,
+                            onShowDisconnectDialog = { showDisconnectDialog = it }
+                        )
                     }
                     SettingsPanelPage.Export -> {
                         ExportPanelContent()
@@ -330,10 +411,82 @@ fun SettingsPanel(
                     SettingsPanelPage.Storage -> {
                         StorageContent()
                     }
+                    SettingsPanelPage.MediaContent -> {
+                        MediaContentScreen()
+                    }
+                    SettingsPanelPage.Calendar -> {
+                        CalendarSettingsContent()
+                    }
                 }
             }
             }  // Close Box
         }
+    }
+
+    // Sync settings dialogs - shown when triggered from SyncSettingsContent
+    if (showCleanSyncDialog) {
+        val syncViewModel: com.bothbubbles.ui.settings.sync.SyncSettingsViewModel = hiltViewModel()
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showCleanSyncDialog = false },
+            icon = { Icon(Icons.Default.Close, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+            title = { Text("Clean sync?") },
+            text = {
+                Text(
+                    "This will delete all local messages and conversations, then re-download everything from the server. This cannot be undone."
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = {
+                        showCleanSyncDialog = false
+                        syncViewModel.cleanSync()
+                    },
+                    colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Text("Clean sync")
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { showCleanSyncDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    if (showDisconnectDialog) {
+        val syncViewModel: com.bothbubbles.ui.settings.sync.SyncSettingsViewModel = hiltViewModel()
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { showDisconnectDialog = false },
+            icon = { Icon(Icons.Default.Close, contentDescription = null) },
+            title = { Text("Disconnect from server?") },
+            text = {
+                Text(
+                    "This will remove all iMessage conversations and messages synced from the BlueBubbles server. " +
+                    "Local SMS/MMS messages will be preserved. This cannot be undone."
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = {
+                        showDisconnectDialog = false
+                        syncViewModel.disconnectServer()
+                    },
+                    colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Text("Disconnect")
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { showDisconnectDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }
 

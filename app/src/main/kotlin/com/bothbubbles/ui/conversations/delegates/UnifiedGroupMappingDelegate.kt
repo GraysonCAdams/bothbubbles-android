@@ -71,20 +71,24 @@ class UnifiedGroupMappingDelegate @AssistedInject constructor(
         chatsMap: Map<String, ChatEntity>,
         participantsMap: Map<String, List<com.bothbubbles.data.local.db.entity.HandleEntity>>
     ): ConversationUiModel? {
+        val isGroup = unifiedChat.sourceId.contains(";chat")
+
         if (chatGuids.isEmpty()) {
-            timber.log.Timber.tag("ConvoDebug").w("Skipping unified chat ${unifiedChat.id.take(12)} - no chatGuids")
+            if (isGroup) {
+                timber.log.Timber.tag("ConvoDebug").w(
+                    "GROUP null: no chatGuids, id=${unifiedChat.id.take(12)}, sourceId=${unifiedChat.sourceId.take(40)}"
+                )
+            }
             return null
         }
 
         // Use pre-fetched chats from batch query
         val chats = chatGuids.mapNotNull { chatsMap[it] }
         if (chats.isEmpty()) {
-            // This is the suspected bug - unified chat exists but no linked chats found in map
-            val isGroup = unifiedChat.sourceId.contains(";chat")
             if (isGroup) {
                 timber.log.Timber.tag("ConvoDebug").w(
-                    "SKIPPING GROUP unified chat: id=${unifiedChat.id.take(12)}, sourceId=${unifiedChat.sourceId.take(40)}, " +
-                    "chatGuids=$chatGuids, chatsMapSize=${chatsMap.size}"
+                    "GROUP null: chats empty, id=${unifiedChat.id.take(12)}, sourceId=${unifiedChat.sourceId.take(40)}, " +
+                    "chatGuids=$chatGuids, chatsMapKeys=${chatsMap.keys.filter { it.contains("chat") }.take(5)}"
                 )
             }
             return null
@@ -181,7 +185,7 @@ class UnifiedGroupMappingDelegate @AssistedInject constructor(
             isPinned = unifiedChat.isPinned,
             pinIndex = unifiedChat.pinIndex ?: Int.MAX_VALUE,
             isMuted = unifiedChat.muteType != null,
-            isGroup = unifiedChat.isGroup,
+            isGroup = isGroup, // Use local variable derived from sourceId, not potentially incorrect DB value
             isTyping = anyTyping,
             isFromMe = isFromMe,
             hasDraft = unifiedChat.textFieldText?.isNotBlank() == true,
@@ -202,7 +206,8 @@ class UnifiedGroupMappingDelegate @AssistedInject constructor(
             lastMessageSource = unifiedChat.latestMessageSource,
             mergedChatGuids = chatGuids,
             isMerged = chatGuids.size > 1,
-            contactKey = PhoneNumberFormatter.getContactKey(address),
+            // Groups don't use contactKey - it's only for deduplicating 1:1 iMessage/SMS chats
+            contactKey = if (!isGroup) PhoneNumberFormatter.getContactKey(address) else "",
             // Enhanced preview fields
             isInvisibleInk = isInvisibleInk,
             reactionPreviewData = reactionPreviewData,

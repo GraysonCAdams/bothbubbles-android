@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.SearchOff
+import com.bothbubbles.ui.components.common.FetchAllMessagesPrompt
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -65,6 +66,8 @@ internal fun SearchOverlay(
     messageSearchResults: List<MessageSearchResult>,
     onConversationClick: (chatGuid: String, mergedGuids: List<String>) -> Unit,
     focusRequester: FocusRequester,
+    initialSyncComplete: Boolean = true,
+    onFetchAllMessagesClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -300,6 +303,17 @@ internal fun SearchOverlay(
                                     onClick = { onConversationClick(result.chatGuid, mergedGuids) },
                                     onLongClick = { } // No long-press actions for search results
                                 )
+                            }
+                        }
+
+                        // Fetch all messages prompt (shown when initial sync not complete)
+                        if (!initialSyncComplete) {
+                            item {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                FetchAllMessagesPrompt(
+                                    onFetchClick = onFetchAllMessagesClick
+                                )
+                                Spacer(modifier = Modifier.height(16.dp))
                             }
                         }
                     }

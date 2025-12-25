@@ -250,6 +250,16 @@ data class MessageCountDto(
 )
 
 /**
+ * Chat count DTO - returned by /api/v1/chat/count
+ * Server returns: { data: { total: number, breakdown: { iMessage: number, SMS: number } } }
+ */
+@JsonClass(generateAdapter = true)
+data class ChatCountDto(
+    @Json(name = "total") val total: Int,
+    @Json(name = "breakdown") val breakdown: Map<String, Int>? = null
+)
+
+/**
  * iCloud account info DTO - returned by /api/v1/icloud/account
  */
 @JsonClass(generateAdapter = true)

@@ -117,6 +117,19 @@ class ChatInfoDelegate @AssistedInject constructor(
                     // This ensures the chat header matches the conversation list avatar
                     val chatGroupPhotoPath = unifiedChat?.effectiveAvatarPath
 
+                    // Determine if all participants have saved contacts
+                    // For 1:1 chats: check if the single participant has a cached display name
+                    // For groups: check if all participants have cached display names
+                    val hasSavedContact = if (it.isGroup) {
+                        participants.isNotEmpty() && participants.all { p -> p.cachedDisplayName != null }
+                    } else {
+                        participants.firstOrNull()?.cachedDisplayName != null
+                    }
+
+                    // Detect shortcodes: typically 5-6 digit numbers used for promotional SMS
+                    val chatIdentifier = it.chatIdentifier ?: participants.firstOrNull()?.address
+                    val isShortcode = chatIdentifier?.let { id -> isShortcode(id) } ?: false
+
                     _state.update { state ->
                         state.copy(
                             chatTitle = chatTitle,
@@ -133,7 +146,9 @@ class ChatInfoDelegate @AssistedInject constructor(
                             smsInputBlocked = it.isSmsChat && !smsPermissionHelper.isDefaultSmsApp(),
                             isSnoozed = false, // Snooze status now managed by UnifiedChatEntity via ChatOperationsDelegate
                             snoozeUntil = null,
-                            discordChannelId = discordChannelId
+                            discordChannelId = discordChannelId,
+                            hasSavedContact = hasSavedContact,
+                            isShortcode = isShortcode
                         )
                     }
                 }
@@ -305,6 +320,19 @@ class ChatInfoDelegate @AssistedInject constructor(
         // Check for email pattern
         val emailPattern = Regex("^[^@]+@[^@]+\\.[^@]+$")
         return phonePattern.matches(trimmed) || emailPattern.matches(trimmed)
+    }
+
+    /**
+     * Check if an address is a shortcode (typically 5-6 digit promotional numbers).
+     * Shortcodes are commonly used by businesses and services for SMS-based marketing,
+     * alerts, and two-factor authentication.
+     */
+    private fun isShortcode(address: String): Boolean {
+        // Extract only digits from the address
+        val digitsOnly = address.filter { it.isDigit() }
+        // Shortcodes are typically 5-6 digits (US standard)
+        // Some countries use 4-8 digits, but 5-6 is most common
+        return digitsOnly.length in 4..6
     }
 
     /**

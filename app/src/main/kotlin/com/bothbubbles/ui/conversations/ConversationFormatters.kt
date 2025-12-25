@@ -6,6 +6,7 @@ import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.displayName
 import com.bothbubbles.data.repository.HandleRepository
+import com.bothbubbles.util.parsing.HtmlEntityDecoder
 import com.bothbubbles.util.parsing.UrlParsingUtils
 import java.time.Instant
 import java.time.LocalDateTime
@@ -100,7 +101,7 @@ internal fun formatAttachmentCount(count: Int, singular: String): String {
  * the preview title/domain when available.
  */
 internal fun formatLinkPreview(conversation: ConversationUiModel): String {
-    val title = conversation.lastMessageLinkTitle
+    val title = HtmlEntityDecoder.decode(conversation.lastMessageLinkTitle)
     val domain = conversation.lastMessageLinkDomain
     val messageText = conversation.lastMessageText
 
@@ -225,6 +226,7 @@ fun formatRelativeTime(timestamp: Long, application: Application): String {
 /**
  * Extract the first name from a full name, excluding emojis and non-letter characters.
  * If the name starts with emojis, finds the first word that contains letters.
+ * If the input is a phone number (no letters), returns the full input unchanged.
  */
 fun extractFirstName(fullName: String): String {
     // Split by whitespace and find the first word that has letters
@@ -237,8 +239,8 @@ fun extractFirstName(fullName: String): String {
             return cleaned
         }
     }
-    // Fallback to the first word cleaned of non-alphanumeric characters
-    return words.firstOrNull()?.filter { it.isLetterOrDigit() } ?: fullName
+    // No letters found - this is likely a phone number, return as-is
+    return fullName
 }
 
 /**

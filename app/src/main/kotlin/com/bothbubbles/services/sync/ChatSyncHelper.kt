@@ -27,15 +27,29 @@ class ChatSyncHelper @Inject constructor(
      * @param alreadySynced Set of chat GUIDs that have already been synced
      * @param progressTracker Tracker for updating progress counters
      * @param chatQueue Channel to send chat tasks for message syncing
+     * @param totalChatCount Pre-fetched total chat count for stable progress denominator.
+     *                       If 0, falls back to incrementing as pages are fetched.
      * @param onProgress Callback for progress updates
      */
     suspend fun fetchAndQueueChats(
         alreadySynced: Set<String>,
         progressTracker: SyncProgressTracker,
         chatQueue: Channel<ChatSyncTask>,
+        totalChatCount: Int = 0,
         onProgress: ((Int) -> Unit)?
     ) {
         var offset = 0
+
+        // Log already synced count for debugging
+        if (alreadySynced.isNotEmpty()) {
+            Timber.tag(TAG).i("Already synced ${alreadySynced.size} chats from previous run")
+        }
+
+        // Use pre-fetched count if available (stable denominator for progress)
+        if (totalChatCount > 0) {
+            progressTracker.totalChatsFound.set(totalChatCount)
+            Timber.tag(TAG).i("Using pre-fetched chat count: $totalChatCount")
+        }
 
         onProgress?.invoke(5)
 
@@ -46,18 +60,30 @@ class ChatSyncHelper @Inject constructor(
             )
 
             val chats = result.getOrThrow()
-            progressTracker.totalChatsFound.addAndGet(chats.size)
+
+            // Only increment if we didn't have a pre-fetched count
+            if (totalChatCount == 0) {
+                progressTracker.totalChatsFound.addAndGet(chats.size)
+            }
+
             Timber.tag(TAG).d("Fetched page at offset $offset: ${chats.size} chats (total: ${progressTracker.totalChatsFound.get()})")
             offset += CHAT_PAGE_SIZE
 
             // Queue each chat for message syncing
+            var queuedCount = 0
+            var skippedCount = 0
             chats.forEach { chat ->
                 if (chat.guid !in alreadySynced) {
                     chatQueue.send(ChatSyncTask(chat.guid, chat.displayName))
+                    queuedCount++
                 } else {
                     // Already synced from previous run
                     progressTracker.processedChats.incrementAndGet()
+                    skippedCount++
                 }
+            }
+            if (skippedCount > 0) {
+                Timber.tag(TAG).d("Page at offset $offset: queued $queuedCount, skipped $skippedCount (already synced)")
             }
 
             // Update progress - chat fetching is ~20% of total work

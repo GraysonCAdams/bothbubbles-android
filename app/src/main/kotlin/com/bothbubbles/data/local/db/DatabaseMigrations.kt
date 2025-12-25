@@ -1777,6 +1777,108 @@ object DatabaseMigrations {
     }
 
     /**
+     * Migration 61→62: Fix incorrect is_group values in unified_chats table.
+     *
+     * ROOT CAUSE FIX: Group chats were being created in unified_chats with is_group=0
+     * because the isGroup parameter wasn't being passed when creating UnifiedChatEntity
+     * in IncomingMessageHandler and GroupContactSyncManager.
+     *
+     * This caused:
+     * 1. Group chats partitioned into individualChats instead of groupConversations
+     * 2. Groups deduplicated by contactKey, removing some group chats from the list
+     * 3. Groups not appearing for 5-10 seconds on initial load
+     *
+     * The migration also clears invalid display names that look like internal IDs
+     * (e.g., "8a5f87", "930d51") from the chats table.
+     */
+    val MIGRATION_61_62 = object : Migration(61, 62) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            Timber.i("Starting migration 61→62: Fix is_group in unified_chats and clear invalid display names")
+
+            // Fix 1: Update is_group for unified_chats that are actually groups
+            // Group chats have source_id containing ";chat" (e.g., "iMessage;+;chat653447225601703668")
+            val groupsFixed = db.compileStatement("""
+                UPDATE unified_chats
+                SET is_group = 1
+                WHERE source_id LIKE '%;chat%'
+                AND is_group = 0
+            """.trimIndent()).executeUpdateDelete()
+            Timber.d("Fixed is_group for $groupsFixed unified_chats")
+
+            // Fix 2: Clear invalid display names that look like internal IDs from chats table
+            // These are short alphanumeric strings (5-8 chars) that are purely hex-like
+            // e.g., "8a5f87", "930d51", "3833831"
+            // The regex check is now in isValidDisplayName(), but existing bad data needs cleanup
+            val namesCleared = db.compileStatement("""
+                UPDATE chats
+                SET display_name = NULL
+                WHERE display_name IS NOT NULL
+                AND length(display_name) BETWEEN 5 AND 8
+                AND display_name GLOB '[0-9a-zA-Z][0-9a-zA-Z][0-9a-zA-Z][0-9a-zA-Z][0-9a-zA-Z]*'
+                AND display_name NOT GLOB '*[^0-9a-zA-Z]*'
+            """.trimIndent()).executeUpdateDelete()
+            Timber.d("Cleared $namesCleared invalid display names from chats")
+
+            // Fix 3: Also clear invalid display names from unified_chats
+            val unifiedNamesCleared = db.compileStatement("""
+                UPDATE unified_chats
+                SET display_name = NULL
+                WHERE display_name IS NOT NULL
+                AND length(display_name) BETWEEN 5 AND 8
+                AND display_name GLOB '[0-9a-zA-Z][0-9a-zA-Z][0-9a-zA-Z][0-9a-zA-Z][0-9a-zA-Z]*'
+                AND display_name NOT GLOB '*[^0-9a-zA-Z]*'
+            """.trimIndent()).executeUpdateDelete()
+            Timber.d("Cleared $unifiedNamesCleared invalid display names from unified_chats")
+
+            Timber.i("Migration 61→62 complete: Fixed is_group for groups and cleared invalid display names")
+        }
+    }
+
+    /**
+     * Migration 62→63: Add calendar_event_occurrences table.
+     *
+     * This table stores calendar events that have been "logged" into conversations
+     * as system-style indicators (similar to group member changes). Events are stored
+     * separately from messages and merged at display time.
+     *
+     * Features:
+     * - Address-based linking so events appear in both iMessage and SMS conversations
+     * - Unique constraint on (chat_address, event_id, event_start_time) for deduplication
+     * - Background sync worker populates events every 30 minutes
+     * - Retroactive loading fills in past 48 hours when opening a conversation
+     */
+    val MIGRATION_62_63 = object : Migration(62, 63) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            Timber.i("Starting migration 62→63: Add calendar_event_occurrences table")
+
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS calendar_event_occurrences (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    chat_address TEXT NOT NULL,
+                    event_id INTEGER NOT NULL,
+                    event_title TEXT NOT NULL,
+                    event_start_time INTEGER NOT NULL,
+                    event_end_time INTEGER NOT NULL,
+                    is_all_day INTEGER NOT NULL DEFAULT 0,
+                    contact_display_name TEXT NOT NULL,
+                    created_at INTEGER NOT NULL DEFAULT ${System.currentTimeMillis()}
+                )
+            """.trimIndent())
+
+            // Index for efficient lookups by chat address
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_calendar_event_occurrences_chat_address ON calendar_event_occurrences(chat_address)")
+
+            // Index for time-based queries
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_calendar_event_occurrences_event_start_time ON calendar_event_occurrences(event_start_time)")
+
+            // Unique constraint to prevent duplicate event entries
+            db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_calendar_event_occurrences_unique ON calendar_event_occurrences(chat_address, event_id, event_start_time)")
+
+            Timber.i("Migration 62→63 complete: Added calendar_event_occurrences table")
+        }
+    }
+
+    /**
      * List of all migrations for use with databaseBuilder.
      *
      * IMPORTANT: Always add new migrations to this array!
@@ -1842,6 +1944,8 @@ object DatabaseMigrations {
         MIGRATION_57_58,
         MIGRATION_58_59,
         MIGRATION_59_60,
-        MIGRATION_60_61
+        MIGRATION_60_61,
+        MIGRATION_61_62,
+        MIGRATION_62_63
     )
 }

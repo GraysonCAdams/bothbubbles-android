@@ -65,14 +65,6 @@ class ChatSyncOperations @Inject constructor(
 
             val chatDtos = body.data.orEmpty()
 
-            // Log group chats with names for debugging sync issues
-            val namedGroups = chatDtos.filter {
-                (it.participants?.size ?: 0) > 1 && !it.displayName.isNullOrBlank()
-            }
-            if (namedGroups.isNotEmpty()) {
-                Timber.tag(TAG).d("Synced ${namedGroups.size} named group chats: ${namedGroups.map { it.displayName }.joinToString(", ")}")
-            }
-
             // Link to unified chats first, then build entities with unified_chat_id
             val chatsWithUnifiedIds = chatDtos.map { chatDto ->
                 val unifiedChatId = linkToUnifiedChatIfNeeded(chatDto)
@@ -243,9 +235,10 @@ internal fun String.isValidDisplayName(): Boolean {
     // Pattern matches (sms*) or (ft*) at end of string
     if (Regex("\\((sms|ft)[a-z_]*\\)$", RegexOption.IGNORE_CASE).containsMatchIn(this)) return false
 
-    // Filter out short alphanumeric strings that look like chat GUIDs (e.g., "c46271")
-    // Valid display names are typically longer and contain more than just alphanumerics
-    if (Regex("^[a-z][0-9a-z]{4,7}$").matches(this)) return false
+    // Filter out short alphanumeric strings that look like internal IDs (e.g., "c46271", "8a5f87", "930d51")
+    // These can start with either a letter or digit. Valid display names are typically longer
+    // and contain more than just alphanumerics
+    if (Regex("^[a-z0-9]{5,8}$", RegexOption.IGNORE_CASE).matches(this)) return false
 
     return true
 }

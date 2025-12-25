@@ -16,6 +16,7 @@ import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.ui.chat.composer.ComposerEvent
 import com.bothbubbles.ui.chat.composer.MentionSuggestion
 import com.bothbubbles.ui.chat.delegates.ChatAttachmentDelegate
+import com.bothbubbles.ui.chat.delegates.ChatCalendarEventsDelegate
 import com.bothbubbles.ui.chat.delegates.ChatComposerDelegate
 import com.bothbubbles.ui.chat.delegates.ChatConnectionDelegate
 import com.bothbubbles.ui.chat.delegates.ChatEffectsDelegate
@@ -31,6 +32,7 @@ import com.bothbubbles.ui.chat.delegates.ChatSendDelegate
 import com.bothbubbles.ui.chat.delegates.ChatSendModeManager
 import com.bothbubbles.ui.chat.delegates.ChatSyncDelegate
 import com.bothbubbles.ui.chat.delegates.ChatThreadDelegate
+import com.bothbubbles.ui.components.dialogs.ReelsSetupConfig
 import com.bothbubbles.ui.components.message.Tapback
 import com.bothbubbles.util.error.AppError
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -105,6 +107,7 @@ class ChatViewModel @Inject constructor(
     private val chatInfoFactory: ChatInfoDelegate.Factory,
     private val headerIntegrationsFactory: ChatHeaderIntegrationsDelegate.Factory,
     private val connectionFactory: ChatConnectionDelegate.Factory,
+    private val calendarEventsFactory: ChatCalendarEventsDelegate.Factory,
     // Media playback
     val exoPlayerPool: ExoPlayerPool,
     // Reels delegate - initialized with chatGuid in init block
@@ -159,6 +162,9 @@ class ChatViewModel @Inject constructor(
         isGroup = false,
         scope = viewModelScope
     )
+
+    // Calendar events delegate - displays calendar events as inline indicators in chat
+    val calendarEvents: ChatCalendarEventsDelegate = calendarEventsFactory.create(viewModelScope)
 
     val operations: ChatOperationsDelegate = operationsFactory.create(chatGuid, viewModelScope)
     val sync: ChatSyncDelegate = syncFactory.create(chatGuid, viewModelScope, mergedChatGuids)
@@ -291,7 +297,7 @@ class ChatViewModel @Inject constructor(
             }
         }
 
-        // Update header integrations when participants load
+        // Update header integrations and calendar events when participants load
         viewModelScope.launch {
             chatInfo.state
                 .map { it.participantAddresses.toSet() to it.isGroup }
@@ -299,6 +305,7 @@ class ChatViewModel @Inject constructor(
                 .collect { (addresses, isGroup) ->
                     if (addresses.isNotEmpty()) {
                         headerIntegrations.updateParticipants(addresses)
+                        calendarEvents.updateParticipants(addresses, isGroup)
                     }
                 }
         }
@@ -857,6 +864,19 @@ class ChatViewModel @Inject constructor(
 
     fun clearError() {
         _uiState.update { it.copy(error = null, appError = null) }
+    }
+
+    /**
+     * Enables the Reels feature with the given configuration.
+     * Called when user confirms the ReelsSetupDialog.
+     */
+    fun enableReelsWithConfig(config: ReelsSetupConfig) {
+        reels.enableReels(
+            includeVideoAttachments = config.includeVideoAttachments,
+            includeTikToks = config.includeTikToks,
+            includeInstagrams = config.includeInstagrams,
+            downloadOnCellular = config.downloadOnCellular
+        )
     }
 
     /**

@@ -32,6 +32,25 @@ sealed class SyncState {
         val isCorrupted: Boolean = false,
         val canRetry: Boolean = true
     ) : SyncState()
+
+    /**
+     * Sync is paused due to network conditions.
+     * Used when cellular sync is disabled and user is on cellular network.
+     */
+    data class Paused(
+        val reason: PauseReason,
+        val previousProgress: Float = 0f
+    ) : SyncState()
+}
+
+/**
+ * Reason why sync is paused.
+ */
+enum class PauseReason {
+    /** Waiting for WiFi connection (cellular sync is disabled) */
+    WAITING_FOR_WIFI,
+    /** No network connection available */
+    NO_CONNECTION
 }
 
 // ============================================================================

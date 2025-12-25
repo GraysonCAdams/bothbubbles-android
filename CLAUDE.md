@@ -688,6 +688,57 @@ The app uses multiple layers to ensure messages are never missed, as BlueBubbles
 - Run lint/tests when making significant changes
 - Prefer editing existing files over creating new ones
 
+## Debugging Crashes via ADB
+
+When the app crashes, use the following process to retrieve the crash report:
+
+### 1. Check for ACRA Crash Reports (Preferred)
+
+The app uses ACRA (Application Crash Report for Android) with a custom crash handler. Crash reports are stored in the app's private directory:
+
+```bash
+# Find crash report files
+adb shell "run-as com.bothbubbles.messaging find /data/data/com.bothbubbles.messaging -name '*crash*' -o -name '*ACRA*' -o -name '*stacktrace*'"
+
+# Read the most recent crash stacktrace (unapproved = not yet sent)
+adb shell "run-as com.bothbubbles.messaging cat '/data/data/com.bothbubbles.messaging/app_ACRA-unapproved/<timestamp>.stacktrace'"
+```
+
+The stacktrace file is JSON containing:
+- `STACK_TRACE`: Full exception stack trace
+- `LOGCAT`: Recent logcat entries before the crash
+- Device info, configuration, and more
+
+### 2. Alternative: Check Logcat for FATAL EXCEPTION
+
+If ACRA didn't catch the crash:
+
+```bash
+# Get recent crash buffer
+adb logcat -d -b crash | tail -150
+
+# Search for fatal exceptions
+adb logcat -d | grep -B 5 -A 100 "FATAL EXCEPTION" | tail -150
+
+# Filter by app package
+adb logcat -d | grep -E "AndroidRuntime|Exception|Error" | grep -i bothbubbles | tail -50
+```
+
+### 3. Check App-Specific Logs
+
+```bash
+# Get logs from the app's process around crash time
+adb logcat -d -t "12-24 20:04:20.000" | grep -E "<PID>|bothbubbles" | head -100
+```
+
+### Common Crash Patterns
+
+1. **IndexOutOfBoundsException in LazyColumn** - Usually indicates race condition where list data changes during scroll. Check for concurrent updates to list state.
+
+2. **ClassCastException in Flow combine** - Using `as` instead of `as?` for StateFlow values. Always use safe casts with defaults.
+
+3. **NullPointerException from `!!`** - Force unwrap on nullable collection operations. Use safe alternatives like `firstOrNull()`, `minOrNull()`.
+
 ## Common Tasks
 
 ### Adding a New Settings Screen

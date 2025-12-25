@@ -8,8 +8,9 @@ import com.bothbubbles.ui.components.message.ReplyPreviewData
 import com.bothbubbles.util.EmojiUtils.analyzeEmojis
 import com.bothbubbles.util.PhoneNumberFormatter
 import com.bothbubbles.ui.util.toStable
-import java.text.SimpleDateFormat
-import java.util.Date
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /**
@@ -224,9 +225,16 @@ fun parseRemovalType(associatedMessageType: String?): Tapback? {
 
 /**
  * Format a timestamp for display in the message bubble.
+ *
+ * @param timestamp Timestamp in milliseconds since epoch
+ * @param is24Hour Whether to use 24-hour format (from system settings)
  */
-fun formatMessageTime(timestamp: Long): String {
-    return SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(timestamp))
+fun formatMessageTime(timestamp: Long, is24Hour: Boolean = false): String {
+    val pattern = if (is24Hour) "HH:mm" else "h:mm a"
+    val formatter = DateTimeFormatter.ofPattern(pattern, Locale.getDefault())
+    val instant = Instant.ofEpochMilli(timestamp)
+    val localTime = instant.atZone(ZoneId.systemDefault()).toLocalTime()
+    return localTime.format(formatter)
 }
 
 /**

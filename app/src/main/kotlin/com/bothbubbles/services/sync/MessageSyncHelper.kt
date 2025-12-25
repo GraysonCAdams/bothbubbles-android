@@ -58,11 +58,11 @@ class MessageSyncHelper @Inject constructor(
                                 syncSource = syncSource
                             )
                             progressTracker.syncedMessages.addAndGet(result.getOrNull()?.size ?: 0)
+                            // Only mark as synced on SUCCESS - failed chats should retry on resume
                             settingsDataStore.markChatSynced(task.guid)
                         } catch (e: Exception) {
                             Timber.e(e, "Failed to sync messages for chat ${task.guid}")
-                            // Mark as synced to avoid retry loop
-                            settingsDataStore.markChatSynced(task.guid)
+                            // Don't mark as synced - chat will be retried on resume
                         }
 
                         val processed = progressTracker.processedChats.incrementAndGet()
@@ -120,10 +120,11 @@ class MessageSyncHelper @Inject constructor(
                                 syncSource = syncSource
                             )
                             progressTracker.syncedMessages.addAndGet(result.getOrNull()?.size ?: 0)
+                            // Only mark as synced on SUCCESS - failed chats should retry on resume
                             settingsDataStore.markChatSynced(chat.guid)
                         } catch (e: Exception) {
                             Timber.e(e, "Failed to sync messages for chat ${chat.guid}")
-                            settingsDataStore.markChatSynced(chat.guid)
+                            // Don't mark as synced - chat will be retried on resume
                         }
 
                         val processed = progressTracker.processedChats.incrementAndGet()

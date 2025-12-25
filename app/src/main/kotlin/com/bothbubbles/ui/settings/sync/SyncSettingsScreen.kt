@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.bothbubbles.services.sync.PauseReason
 import com.bothbubbles.services.sync.SyncState
 import com.bothbubbles.ui.settings.components.SettingsCard
 
@@ -168,70 +169,62 @@ fun SyncSettingsContent(
                 }
             }
 
-            // Sync status card (when syncing)
+            // Syncing paused card
             val syncState = uiState.syncState
-            if (syncState is SyncState.Syncing) {
-                SettingsCard {
+            if (syncState is SyncState.Paused) {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer
+                    )
+                ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        // iMessage progress (hide when complete)
-                        if (!syncState.iMessageComplete) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(24.dp),
-                                    strokeWidth = 2.dp
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.PauseCircle,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Syncing paused",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer
                                 )
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    // Show chat progress with message count
-                                    val chatProgress = if (syncState.totalChats > 0) {
-                                        "${syncState.processedChats}/${syncState.totalChats} chats"
-                                    } else {
-                                        "Fetching chats..."
-                                    }
-                                    val messageCount = if (syncState.syncedMessages > 0) {
-                                        " • ${syncState.syncedMessages} messages"
-                                    } else ""
-                                    Text(
-                                        text = "iMessage: $chatProgress$messageCount",
-                                        style = MaterialTheme.typography.bodyMedium
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    LinearProgressIndicator(
-                                        progress = { syncState.iMessageProgress },
-                                        modifier = Modifier.fillMaxWidth()
-                                    )
-                                }
+                                Text(
+                                    text = when (syncState.reason) {
+                                        PauseReason.WAITING_FOR_WIFI -> "Waiting for WiFi connection..."
+                                        PauseReason.NO_CONNECTION -> "No internet connection"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f)
+                                )
                             }
                         }
-
-                        // SMS progress (show only if running and not complete)
-                        if (syncState.smsTotal > 0 && !syncState.smsComplete) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically
+                        // Progress bar (gray, showing previous progress)
+                        LinearProgressIndicator(
+                            progress = { syncState.previousProgress },
+                            modifier = Modifier.fillMaxWidth(),
+                            color = MaterialTheme.colorScheme.outline,
+                            trackColor = MaterialTheme.colorScheme.outlineVariant
+                        )
+                        // Action buttons
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = { viewModel.syncAnywayOneTime() },
+                                modifier = Modifier.weight(1f)
                             ) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(24.dp),
-                                    strokeWidth = 2.dp
-                                )
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "SMS: ${syncState.smsCurrent}/${syncState.smsTotal}",
-                                        style = MaterialTheme.typography.bodyMedium
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    LinearProgressIndicator(
-                                        progress = { syncState.smsProgress },
-                                        modifier = Modifier.fillMaxWidth()
-                                    )
-                                }
+                                Text("Sync Anyway")
                             }
                         }
                     }
@@ -352,6 +345,34 @@ fun SyncSettingsContent(
                         },
                         modifier = Modifier.clickable {
                             viewModel.setAutoDownloadEnabled(!uiState.autoDownloadEnabled)
+                        }
+                    )
+
+                    HorizontalDivider()
+
+                    // Sync via cellular toggle
+                    ListItem(
+                        headlineContent = { Text("Sync via cellular") },
+                        supportingContent = {
+                            Text(
+                                if (uiState.syncOnCellular) {
+                                    "Messages sync on any network"
+                                } else {
+                                    "Messages sync only on WiFi"
+                                }
+                            )
+                        },
+                        leadingContent = {
+                            Icon(Icons.Default.SignalCellularAlt, contentDescription = null)
+                        },
+                        trailingContent = {
+                            Switch(
+                                checked = uiState.syncOnCellular,
+                                onCheckedChange = { viewModel.setSyncOnCellular(it) }
+                            )
+                        },
+                        modifier = Modifier.clickable {
+                            viewModel.setSyncOnCellular(!uiState.syncOnCellular)
                         }
                     )
                 }

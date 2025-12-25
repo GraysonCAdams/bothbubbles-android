@@ -363,7 +363,7 @@ class ComposeViewModel @Inject constructor(
                 chatIdentifier = normalizedAddress,
                 displayName = null,
                 isGroup = false,
-                latestMessageDate = null
+                latestMessageDate = System.currentTimeMillis()
             )
             chatRepository.insertChat(newChat)
 

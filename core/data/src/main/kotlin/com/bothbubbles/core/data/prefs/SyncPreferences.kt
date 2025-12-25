@@ -62,6 +62,17 @@ class SyncPreferences @Inject constructor(
         prefs[Keys.INITIAL_SYNC_MESSAGES_PER_CHAT] ?: 25
     }
 
+    // ===== Cellular Sync Settings =====
+
+    /**
+     * Whether syncing is allowed over cellular data.
+     * When false, syncing will pause when not on WiFi/Ethernet.
+     * Default: false (WiFi only) - conservative default to protect user data.
+     */
+    val syncOnCellular: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.SYNC_ON_CELLULAR] ?: false
+    }
+
     // ===== State Restoration =====
 
     val lastOpenChatGuid: Flow<String?> = dataStore.data.map { prefs ->
@@ -119,6 +130,12 @@ class SyncPreferences @Inject constructor(
     suspend fun setInitialSyncMessagesPerChat(messagesPerChat: Int) {
         dataStore.edit { prefs ->
             prefs[Keys.INITIAL_SYNC_MESSAGES_PER_CHAT] = messagesPerChat
+        }
+    }
+
+    suspend fun setSyncOnCellular(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.SYNC_ON_CELLULAR] = enabled
         }
     }
 
@@ -214,6 +231,9 @@ class SyncPreferences @Inject constructor(
         val INITIAL_SYNC_COMPLETE_TIMESTAMP = longPreferencesKey("initial_sync_complete_timestamp")
         val SYNCED_CHAT_GUIDS = stringPreferencesKey("synced_chat_guids")
         val INITIAL_SYNC_MESSAGES_PER_CHAT = intPreferencesKey("initial_sync_messages_per_chat")
+
+        // Cellular Sync Settings
+        val SYNC_ON_CELLULAR = booleanPreferencesKey("sync_on_cellular")
 
         // State Restoration
         val LAST_OPEN_CHAT_GUID = stringPreferencesKey("last_open_chat_guid")

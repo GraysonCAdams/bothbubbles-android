@@ -20,7 +20,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
@@ -385,24 +384,6 @@ fun GifAttachment(
                         color = MaterialTheme.colorScheme.primary
                     )
                 }
-            }
-        }
-
-        // GIF badge - only show for non-transparent GIFs to avoid clutter
-        if (!isLoading && !isError && !isTransparent) {
-            Surface(
-                shape = RoundedCornerShape(4.dp),
-                color = Color.Black.copy(alpha = 0.6f),
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(8.dp)
-            ) {
-                Text(
-                    text = "GIF",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Color.White,
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                )
             }
         }
 
@@ -913,24 +894,6 @@ fun BorderlessGifAttachment(
                         color = MaterialTheme.colorScheme.primary
                     )
                 }
-            }
-        }
-
-        // GIF badge - only show for non-transparent GIFs
-        if (!isLoading && !isError && !isTransparent) {
-            Surface(
-                shape = RoundedCornerShape(4.dp),
-                color = Color.Black.copy(alpha = 0.6f),
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(8.dp)
-            ) {
-                Text(
-                    text = "GIF",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Color.White,
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                )
             }
         }
 

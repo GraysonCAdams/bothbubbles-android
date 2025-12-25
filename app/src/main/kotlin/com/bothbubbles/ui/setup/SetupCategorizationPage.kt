@@ -220,9 +220,9 @@ internal fun CategorizationPage(
             }
         }
 
-        Spacer(modifier = Modifier.weight(1f))
+        Spacer(modifier = Modifier.height(24.dp))
 
-        // Navigation buttons
+        // Navigation buttons - Back and Enable/Continue in same row
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -245,42 +245,41 @@ internal fun CategorizationPage(
                     Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null)
                 }
             } else {
-                // Download or skip options
-                Column(horizontalAlignment = Alignment.End) {
-                    Button(
-                        onClick = onDownloadMlModel,
-                        enabled = !uiState.mlDownloading,
-                        modifier = Modifier.height(48.dp)
-                    ) {
-                        if (uiState.mlDownloading) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.onPrimary
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Downloading...")
-                        } else {
-                            Icon(Icons.Default.Download, contentDescription = null)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Enable")
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    TextButton(
-                        onClick = onSkip,
-                        enabled = !uiState.mlDownloading
-                    ) {
-                        Text("Skip", fontSize = 14.sp)
+                // Download button
+                Button(
+                    onClick = onDownloadMlModel,
+                    enabled = !uiState.mlDownloading,
+                    modifier = Modifier.height(48.dp)
+                ) {
+                    if (uiState.mlDownloading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Downloading...")
+                    } else {
+                        Icon(Icons.Default.Download, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Enable")
                     }
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Note about enabling later
+        // Skip option (only when not downloaded)
         if (!uiState.mlModelDownloaded && !uiState.mlSetupComplete) {
+            Spacer(modifier = Modifier.height(8.dp))
+            TextButton(
+                onClick = onSkip,
+                enabled = !uiState.mlDownloading
+            ) {
+                Text("Skip", fontSize = 14.sp)
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
             Text(
                 text = "You can enable this later in Settings",
                 style = MaterialTheme.typography.bodySmall,

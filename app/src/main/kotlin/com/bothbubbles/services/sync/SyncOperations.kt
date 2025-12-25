@@ -163,7 +163,7 @@ class SyncOperations @Inject constructor(
         onStateUpdate: (SyncState) -> Unit,
         onLastSyncTimeUpdate: (Long) -> Unit
     ): Result<Unit> = runCatching {
-        Timber.i("Performing clean sync - clearing local data")
+        Timber.tag(TAG).i("performCleanSync() STARTED - clearing local data")
         onStateUpdate(
             SyncState.Syncing(
                 progress = 0f,

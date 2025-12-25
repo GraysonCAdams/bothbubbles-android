@@ -1,6 +1,7 @@
 package com.bothbubbles.ui.setup
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,26 +11,25 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.Error
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import com.bothbubbles.util.HapticUtils
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -37,7 +37,6 @@ import androidx.compose.ui.unit.dp
 @Composable
 internal fun SyncPage(
     uiState: SetupUiState,
-    onSkipEmptyChatsChange: (Boolean) -> Unit,
     onStartSync: () -> Unit,
     onBack: () -> Unit
 ) {
@@ -117,82 +116,86 @@ internal fun SyncPage(
                 Spacer(modifier = Modifier.weight(1f))
             }
 
-            // Settings view (before sync)
+            // Ready to sync view (before sync)
             else -> {
+                Spacer(modifier = Modifier.weight(1f))
+
+                // Large icon
+                Surface(
+                    modifier = Modifier.size(100.dp),
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.primary
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Default.CloudSync,
+                            contentDescription = null,
+                            modifier = Modifier.size(50.dp),
+                            tint = MaterialTheme.colorScheme.onPrimary
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(32.dp))
+
                 Text(
-                    text = "Sync Settings",
+                    text = "Ready to Sync",
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.semantics { heading() }
                 )
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 Text(
-                    text = "Configure how iMessages are synced from your server",
-                    style = MaterialTheme.typography.bodyLarge,
+                    text = "Your messages will be synced from the BlueBubbles server. This may take a few minutes depending on how many messages you have.",
+                    style = MaterialTheme.typography.bodyMedium,
                     textAlign = TextAlign.Center,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                 )
-
-                Spacer(modifier = Modifier.height(32.dp))
-
-                // Skip empty chats toggle
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Skip empty conversations",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Text(
-                                text = "Don't sync conversations with no messages",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                            )
-                        }
-                        val haptic = LocalHapticFeedback.current
-                        Switch(
-                            checked = uiState.skipEmptyChats,
-                            onCheckedChange = {
-                                HapticUtils.onConfirm(haptic)
-                                onSkipEmptyChatsChange(it)
-                            }
-                        )
-                    }
-                }
 
                 Spacer(modifier = Modifier.weight(1f))
 
-                // Navigation buttons
+                // Large Start Sync button
+                Button(
+                    onClick = onStartSync,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary
+                    )
+                ) {
+                    Icon(
+                        Icons.Default.Sync,
+                        contentDescription = null,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = "Start Sync",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Back button
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.Start,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     TextButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Back")
                     }
-
-                    Button(
-                        onClick = onStartSync,
-                        modifier = Modifier.height(48.dp)
-                    ) {
-                        Icon(Icons.Default.Sync, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Start Sync")
-                    }
                 }
+
+                Spacer(modifier = Modifier.height(16.dp))
             }
         }
     }

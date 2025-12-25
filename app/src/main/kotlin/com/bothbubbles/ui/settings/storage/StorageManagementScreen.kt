@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.AlertDialog
@@ -320,7 +321,7 @@ private fun StorageManagementContent(
                 StorageCategoryRow(
                     icon = Icons.Default.Videocam,
                     title = "Videos",
-                    subtitle = "Cached videos and social media",
+                    subtitle = "Cached video attachments",
                     size = breakdown.videos,
                     formatBytes = formatBytes,
                     isClearing = clearingCategory == StorageCategory.VIDEOS,
@@ -343,12 +344,24 @@ private fun StorageManagementContent(
 
                 StorageCategoryRow(
                     icon = Icons.Default.Link,
-                    title = "Downloaded Links",
-                    subtitle = "Link previews and social media videos",
+                    title = "Link Previews",
+                    subtitle = "Cached website previews",
                     size = breakdown.linkPreviews,
                     formatBytes = formatBytes,
                     isClearing = clearingCategory == StorageCategory.LINK_PREVIEWS,
                     onClear = { categoryToClear = StorageCategory.LINK_PREVIEWS }
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                StorageCategoryRow(
+                    icon = Icons.Default.PlayCircle,
+                    title = "Social Media",
+                    subtitle = "Downloaded reels and TikToks",
+                    size = breakdown.socialMedia,
+                    formatBytes = formatBytes,
+                    isClearing = clearingCategory == StorageCategory.SOCIAL_MEDIA,
+                    onClear = { categoryToClear = StorageCategory.SOCIAL_MEDIA }
                 )
 
                 if (breakdown.other > 0) {
@@ -402,6 +415,7 @@ private fun StorageManagementContent(
                 StorageCategory.VIDEOS -> breakdown.videos
                 StorageCategory.DOCUMENTS -> breakdown.documents
                 StorageCategory.LINK_PREVIEWS -> breakdown.linkPreviews
+                StorageCategory.SOCIAL_MEDIA -> breakdown.socialMedia
                 StorageCategory.ALL -> breakdown.total
             },
             formatBytes = formatBytes,
@@ -503,6 +517,7 @@ private fun StorageBreakdownCard(
                     breakdown.videos to MaterialTheme.colorScheme.secondary,
                     breakdown.documents to MaterialTheme.colorScheme.tertiary,
                     breakdown.linkPreviews to MaterialTheme.colorScheme.error,
+                    breakdown.socialMedia to MaterialTheme.colorScheme.inversePrimary,
                     breakdown.other to MaterialTheme.colorScheme.outline
                 ).filter { it.first > 0 }
 
@@ -531,7 +546,7 @@ private fun StorageBreakdownCard(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Legend
+            // Legend - Two rows for better readability
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly
@@ -539,7 +554,15 @@ private fun StorageBreakdownCard(
                 StorageLegendItem("Images", MaterialTheme.colorScheme.primary)
                 StorageLegendItem("Videos", MaterialTheme.colorScheme.secondary)
                 StorageLegendItem("Docs", MaterialTheme.colorScheme.tertiary)
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
                 StorageLegendItem("Links", MaterialTheme.colorScheme.error)
+                StorageLegendItem("Social", MaterialTheme.colorScheme.inversePrimary)
+                StorageLegendItem("Other", MaterialTheme.colorScheme.outline)
             }
         }
     }
@@ -643,7 +666,8 @@ private fun ClearConfirmationDialog(
         StorageCategory.IMAGES -> "Clear Images?"
         StorageCategory.VIDEOS -> "Clear Videos?"
         StorageCategory.DOCUMENTS -> "Clear Documents?"
-        StorageCategory.LINK_PREVIEWS -> "Clear Downloaded Links?"
+        StorageCategory.LINK_PREVIEWS -> "Clear Link Previews?"
+        StorageCategory.SOCIAL_MEDIA -> "Clear Social Media?"
         StorageCategory.ALL -> "Clear All Cache?"
     }
 

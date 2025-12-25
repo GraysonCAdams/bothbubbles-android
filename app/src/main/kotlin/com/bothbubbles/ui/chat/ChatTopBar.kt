@@ -51,6 +51,8 @@ import com.bothbubbles.util.PhoneNumberFormatter
  * @param reelsFeedEnabled Whether the Reels feed feature is enabled
  * @param hasReelVideos Whether there are cached reel videos for this chat
  * @param unwatchedReelsCount Count of unwatched Reels received after initial sync (for badge)
+ * @param hasSavedContact Whether the chat has a saved contact (for showing Reels button)
+ * @param isShortcode Whether this is a shortcode (hide Reels button for shortcodes)
  * @param isBubbleMode When true, shows simplified UI for Android conversation bubbles
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -65,12 +67,15 @@ fun ChatTopBar(
     onDetailsClick: () -> Unit,
     onVideoCallClick: () -> Unit,
     onReelsClick: (unwatchedOnly: Boolean) -> Unit,
+    onReelsSetupClick: () -> Unit,
     onLife360MapClick: (participantAddress: String) -> Unit,
     onMenuAction: (ChatMenuAction) -> Unit,
     modifier: Modifier = Modifier,
     reelsFeedEnabled: Boolean = false,
     hasReelVideos: Boolean = false,
     unwatchedReelsCount: Int = 0,
+    hasSavedContact: Boolean = false,
+    isShortcode: Boolean = false,
     isBubbleMode: Boolean = false
 ) {
     // Collect state internally from delegates to avoid ChatScreen recomposition
@@ -102,10 +107,13 @@ fun ChatTopBar(
         reelsFeedEnabled = reelsFeedEnabled,
         hasReelVideos = hasReelVideos,
         unwatchedReelsCount = unwatchedReelsCount,
+        hasSavedContact = hasSavedContact,
+        isShortcode = isShortcode,
         onBackClick = onBackClick,
         onDetailsClick = onDetailsClick,
         onVideoCallClick = onVideoCallClick,
         onReelsClick = onReelsClick,
+        onReelsSetupClick = onReelsSetupClick,
         onMenuAction = onMenuAction,
         modifier = modifier,
         isBubbleMode = isBubbleMode
@@ -136,10 +144,13 @@ private fun ChatTopBarContent(
     reelsFeedEnabled: Boolean,
     hasReelVideos: Boolean,
     unwatchedReelsCount: Int,
+    hasSavedContact: Boolean,
+    isShortcode: Boolean,
     onBackClick: () -> Unit,
     onDetailsClick: () -> Unit,
     onVideoCallClick: () -> Unit,
     onReelsClick: (unwatchedOnly: Boolean) -> Unit,
+    onReelsSetupClick: () -> Unit,
     onMenuAction: (ChatMenuAction) -> Unit,
     modifier: Modifier = Modifier,
     isBubbleMode: Boolean = false
@@ -228,12 +239,12 @@ private fun ChatTopBarContent(
                     Icon(Icons.Default.OpenInFull, contentDescription = "Open in app")
                 }
             } else {
-                // Reels button - shown for all chats when enabled and has videos
-                // Shows badge with unwatched count in bottom-right, dropdown menu if unwatched exist
+                // Reels button - shown for chats with saved contacts (not shortcodes)
+                // Shows badge with unwatched count in bottom-right
                 // Pulses and uses active color when there are unwatched reels
-                if (reelsFeedEnabled && hasReelVideos) {
-                    var showReelsMenu = remember { mutableStateOf(false) }
-                    val hasUnwatched = unwatchedReelsCount > 0
+                // If Reels is not enabled, tapping opens setup dialog
+                if (hasSavedContact && !isShortcode) {
+                    val hasUnwatched = reelsFeedEnabled && unwatchedReelsCount > 0
 
                     // Subtle pulse animation for unwatched reels (1.0 to 1.08, never smaller)
                     val infiniteTransition = rememberInfiniteTransition(label = "reels_pulse")
@@ -247,69 +258,50 @@ private fun ChatTopBarContent(
                         label = "reels_pulse_scale"
                     )
 
-                    Box {
-                        BadgedBox(
-                            badge = {
-                                if (hasUnwatched) {
-                                    Badge(
-                                        containerColor = MaterialTheme.colorScheme.onSurface,
-                                        contentColor = MaterialTheme.colorScheme.surface,
-                                        modifier = Modifier.semantics {
-                                            contentDescription = "$unwatchedReelsCount unwatched reels"
-                                        }
-                                    ) {
-                                        Text(
-                                            text = if (unwatchedReelsCount > 99) "99+" else unwatchedReelsCount.toString(),
-                                            style = MaterialTheme.typography.labelSmall
-                                        )
+                    // Determine icon tint based on state
+                    val iconTint = when {
+                        !reelsFeedEnabled -> MaterialTheme.colorScheme.onSurfaceVariant // Muted when disabled
+                        hasUnwatched -> MaterialTheme.colorScheme.primary // Active when unwatched
+                        else -> LocalContentColor.current // Normal
+                    }
+
+                    BadgedBox(
+                        badge = {
+                            if (hasUnwatched) {
+                                Badge(
+                                    containerColor = MaterialTheme.colorScheme.onSurface,
+                                    contentColor = MaterialTheme.colorScheme.surface,
+                                    modifier = Modifier.semantics {
+                                        contentDescription = "$unwatchedReelsCount unwatched reels"
                                     }
+                                ) {
+                                    Text(
+                                        text = if (unwatchedReelsCount > 99) "99+" else unwatchedReelsCount.toString(),
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
                                 }
-                            }
-                        ) {
-                            IconButton(
-                                onClick = {
-                                    // If unwatched exist, show dropdown menu; otherwise go straight to all reels
-                                    if (hasUnwatched) {
-                                        showReelsMenu.value = true
-                                    } else {
-                                        onReelsClick(false)
-                                    }
-                                }
-                            ) {
-                                Icon(
-                                    Icons.Default.Subscriptions,
-                                    contentDescription = "Reels feed",
-                                    tint = if (hasUnwatched) {
-                                        MaterialTheme.colorScheme.primary
-                                    } else {
-                                        LocalContentColor.current
-                                    },
-                                    modifier = if (hasUnwatched) {
-                                        Modifier.scale(pulseScale)
-                                    } else {
-                                        Modifier
-                                    }
-                                )
                             }
                         }
-
-                        // Dropdown menu for selecting unwatched only or all reels
-                        DropdownMenu(
-                            expanded = showReelsMenu.value,
-                            onDismissRequest = { showReelsMenu.value = false }
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("Unwatched only ($unwatchedReelsCount)") },
-                                onClick = {
-                                    showReelsMenu.value = false
-                                    onReelsClick(true)
+                    ) {
+                        IconButton(
+                            onClick = {
+                                if (!reelsFeedEnabled) {
+                                    // Not enabled - show setup dialog
+                                    onReelsSetupClick()
+                                } else {
+                                    // Go directly to Reels - unwatched shown first if any
+                                    onReelsClick(hasUnwatched)
                                 }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("All reels") },
-                                onClick = {
-                                    showReelsMenu.value = false
-                                    onReelsClick(false)
+                            }
+                        ) {
+                            Icon(
+                                Icons.Default.Subscriptions,
+                                contentDescription = if (reelsFeedEnabled) "Reels feed" else "Enable Reels",
+                                tint = iconTint,
+                                modifier = if (hasUnwatched) {
+                                    Modifier.scale(pulseScale)
+                                } else {
+                                    Modifier
                                 }
                             )
                         }

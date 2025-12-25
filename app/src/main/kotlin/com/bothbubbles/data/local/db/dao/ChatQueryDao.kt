@@ -56,7 +56,7 @@ interface ChatQueryDao {
 
     @Query("""
         SELECT * FROM chats
-        WHERE date_deleted IS NULL AND is_group = 0
+        WHERE date_deleted IS NULL AND is_group = 0 AND latest_message_date IS NOT NULL
         ORDER BY latest_message_date DESC
         LIMIT :limit OFFSET :offset
     """)
@@ -64,13 +64,13 @@ interface ChatQueryDao {
 
     @Query("""
         SELECT COUNT(*) FROM chats
-        WHERE date_deleted IS NULL AND is_group = 0
+        WHERE date_deleted IS NULL AND is_group = 0 AND latest_message_date IS NOT NULL
     """)
     suspend fun getNonGroupChatCount(): Int
 
     @Query("""
         SELECT COUNT(*) FROM chats
-        WHERE date_deleted IS NULL AND is_group = 0
+        WHERE date_deleted IS NULL AND is_group = 0 AND latest_message_date IS NOT NULL
     """)
     fun observeNonGroupChatCount(): Flow<Int>
 

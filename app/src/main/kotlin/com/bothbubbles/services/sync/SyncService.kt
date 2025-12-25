@@ -12,6 +12,7 @@ import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.di.IoDispatcher
 import com.bothbubbles.services.notifications.Notifier
 import com.bothbubbles.util.NetworkConfig
+import com.bothbubbles.util.NetworkConnectivityManager
 import com.bothbubbles.util.retryWithBackoffResult
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -40,6 +41,7 @@ class SyncService @Inject constructor(
     private val smsRepository: SmsRepository,
     private val syncRangeDao: com.bothbubbles.data.local.db.dao.SyncRangeDao,
     private val notifier: Notifier,
+    private val networkManager: NetworkConnectivityManager,
     @ApplicationScope private val applicationScope: CoroutineScope,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
@@ -55,6 +57,71 @@ class SyncService @Inject constructor(
     private val _lastSyncTime = MutableStateFlow(0L)
     val lastSyncTime: StateFlow<Long> = _lastSyncTime.asStateFlow()
 
+    // Track if there's a pending sync waiting for network
+    private var hasPendingInitialSync = false
+
+    init {
+        observeNetworkForAutoResume()
+    }
+
+    /**
+     * Observe network state and auto-resume sync when WiFi reconnects.
+     * Only resumes if sync was paused due to cellular restriction.
+     */
+    private fun observeNetworkForAutoResume() {
+        applicationScope.launch {
+            networkManager.networkState.collect { networkState ->
+                val currentState = _syncState.value
+                if (currentState is SyncState.Paused && currentState.reason == PauseReason.WAITING_FOR_WIFI) {
+                    // Check if we can now sync (WiFi reconnected or user enabled cellular)
+                    if (canSyncNow()) {
+                        Timber.i("Network conditions now allow sync - resuming")
+                        _syncState.value = SyncState.Idle
+                        if (hasPendingInitialSync) {
+                            hasPendingInitialSync = false
+                            startInitialSync()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Check if sync is allowed based on network conditions and user preferences.
+     * Returns true if on WiFi/Ethernet/Other, or if on cellular and cellular sync is allowed.
+     */
+    private suspend fun canSyncNow(): Boolean {
+        val networkState = networkManager.networkState.value
+        if (!networkState.isConnected) return false
+
+        val allowCellular = settingsDataStore.syncOnCellular.first()
+        return when (networkState.type) {
+            NetworkConnectivityManager.NetworkType.WIFI,
+            NetworkConnectivityManager.NetworkType.ETHERNET,
+            NetworkConnectivityManager.NetworkType.OTHER -> true  // VPN, etc.
+            NetworkConnectivityManager.NetworkType.CELLULAR -> allowCellular
+            NetworkConnectivityManager.NetworkType.NONE -> false
+        }
+    }
+
+    /**
+     * Perform a one-time sync override, ignoring cellular restrictions.
+     * Used for "Sync Anyway" button when user explicitly wants to sync on cellular.
+     */
+    fun syncAnywayOneTime() {
+        applicationScope.launch(ioDispatcher) {
+            val currentState = _syncState.value
+            if (currentState is SyncState.Paused) {
+                Timber.i("User requested one-time sync override")
+                _syncState.value = SyncState.Idle
+                hasPendingInitialSync = false
+                // Perform sync without checking network (one-time override)
+                performInitialSyncInternal()
+            }
+        }
+    }
+
     /**
      * Perform initial full sync
      * Downloads all chats and recent messages from the server concurrently.
@@ -65,11 +132,36 @@ class SyncService @Inject constructor(
      * When SMS is enabled and not yet imported, SMS import runs concurrently
      * with iMessage sync for faster initial setup.
      *
+     * Respects network preferences - will pause if on cellular and cellular sync is disabled.
+     *
      * @param messagesPerChat Number of messages to sync per chat
      * @param onProgress Optional callback for progress updates (0-100). When provided,
      *                   internal _syncState updates are suppressed (caller manages state).
      */
     suspend fun performInitialSync(
+        messagesPerChat: Int = MESSAGE_PAGE_SIZE,
+        onProgress: ((progress: Int, processedChats: Int, totalChats: Int, syncedMessages: Int) -> Unit)? = null
+    ): Result<Unit> {
+        // Check network conditions before syncing
+        if (!canSyncNow()) {
+            val networkState = networkManager.networkState.value
+            val reason = if (!networkState.isConnected) {
+                PauseReason.NO_CONNECTION
+            } else {
+                PauseReason.WAITING_FOR_WIFI
+            }
+            Timber.i("Sync paused: $reason")
+            hasPendingInitialSync = true
+            _syncState.value = SyncState.Paused(reason = reason, previousProgress = 0f)
+            return Result.success(Unit) // Return success but don't sync
+        }
+        return performInitialSyncInternal(messagesPerChat, onProgress)
+    }
+
+    /**
+     * Internal implementation of initial sync, called after network check passes.
+     */
+    private suspend fun performInitialSyncInternal(
         messagesPerChat: Int = MESSAGE_PAGE_SIZE,
         onProgress: ((progress: Int, processedChats: Int, totalChats: Int, syncedMessages: Int) -> Unit)? = null
     ): Result<Unit> = retryWithBackoffResult(
@@ -104,11 +196,19 @@ class SyncService @Inject constructor(
         // Get already synced chats (for resume scenario)
         val alreadySynced = settingsDataStore.syncedChatGuids.first()
 
-        // Initialize progress tracker (chat-based progress)
+        // Initialize progress tracker
         val progressTracker = SyncProgressTracker()
 
+        // Pre-fetch total chat count for stable progress denominator
+        // This prevents progress jumps caused by totalChats growing as pages are fetched
+        val totalChatCount = chatRepository.getServerChatCount().getOrDefault(0)
+        if (totalChatCount > 0) {
+            progressTracker.totalChatsFound.set(totalChatCount)
+            Timber.tag(TAG).i("Pre-fetched chat count: $totalChatCount")
+        }
+
         // Helper to update progress - tracks iMessage and SMS separately
-        // Progress is based on chats processed
+        // Progress is based on chats processed vs total (stable denominator from pre-fetch)
         fun updateProgress(stage: String, chatName: String? = null) {
             val imProgress = progressTracker.calculateInitialSyncProgressFloat()
             val imComplete = imProgress >= 0.99f
@@ -172,6 +272,7 @@ class SyncService @Inject constructor(
                     alreadySynced = alreadySynced,
                     progressTracker = progressTracker,
                     chatQueue = chatQueue,
+                    totalChatCount = totalChatCount,
                     onProgress = { progress ->
                         if (onProgress == null) {
                             updateProgress("Fetching conversations...")
@@ -243,8 +344,30 @@ class SyncService @Inject constructor(
      * Called on app startup if initialSyncStarted=true but initialSyncComplete=false.
      * Skips already-synced chats and continues from where it left off.
      * Uses concurrent message syncing for better performance.
+     *
+     * Respects network preferences - will pause if on cellular and cellular sync is disabled.
      */
-    suspend fun resumeInitialSync(): Result<Unit> = runCatching {
+    suspend fun resumeInitialSync(): Result<Unit> {
+        // Check network conditions before resuming
+        if (!canSyncNow()) {
+            val networkState = networkManager.networkState.value
+            val reason = if (!networkState.isConnected) {
+                PauseReason.NO_CONNECTION
+            } else {
+                PauseReason.WAITING_FOR_WIFI
+            }
+            Timber.i("Resume sync paused: $reason")
+            hasPendingInitialSync = true
+            _syncState.value = SyncState.Paused(reason = reason, previousProgress = 0f)
+            return Result.success(Unit)
+        }
+        return resumeInitialSyncInternal()
+    }
+
+    /**
+     * Internal implementation of resume sync, called after network check passes.
+     */
+    private suspend fun resumeInitialSyncInternal(): Result<Unit> = runCatching {
         Timber.i("Resuming interrupted initial sync (concurrent mode)")
 
         val alreadySynced = settingsDataStore.syncedChatGuids.first()
@@ -343,11 +466,19 @@ class SyncService @Inject constructor(
     }
 
     /**
-     * Perform incremental sync
+     * Perform incremental sync.
      * Downloads only new messages since last sync using a single API call.
      * Runs silently in the background without updating UI progress state.
+     *
+     * Respects network preferences - will skip if on cellular and cellular sync is disabled.
      */
     suspend fun performIncrementalSync(): Result<Unit> {
+        // Check network conditions before syncing
+        if (!canSyncNow()) {
+            Timber.d("Incremental sync skipped: network conditions don't allow sync")
+            return Result.success(Unit) // Silent skip for incremental sync
+        }
+
         val lastSync = settingsDataStore.lastSyncTime.first()
         if (lastSync == 0L) {
             // No previous sync, perform initial
@@ -389,22 +520,26 @@ class SyncService @Inject constructor(
     /**
      * Clear all local data and perform fresh sync.
      * Delegates to SyncOperations for database cleanup.
+     * Bypasses network check since user explicitly requested this action.
      */
-    suspend fun performCleanSync(): Result<Unit> =
-        syncOperations.performCleanSync(
-            performInitialSync = { performInitialSync() },
+    suspend fun performCleanSync(): Result<Unit> {
+        Timber.tag(TAG).i("performCleanSync() called in SyncService")
+        return syncOperations.performCleanSync(
+            performInitialSync = { performInitialSyncInternal() },  // Bypass network check
             onStateUpdate = { _syncState.value = it },
             onLastSyncTimeUpdate = { _lastSyncTime.value = it }
         )
+    }
 
     /**
      * Purge all data and reimport with unified chat groups.
      * Delegates to SyncOperations for database cleanup and concurrent import.
+     * Bypasses network check since user explicitly requested this action.
      */
     suspend fun performUnifiedResync(): Result<Unit> =
         syncOperations.performUnifiedResync(
             performInitialSync = { onProgress ->
-                performInitialSync(
+                performInitialSyncInternal(  // Bypass network check
                     onProgress = { progress, chatsSynced, chatsTotal, messagesSynced ->
                         onProgress(progress, chatsSynced, chatsTotal, messagesSynced)
                     }

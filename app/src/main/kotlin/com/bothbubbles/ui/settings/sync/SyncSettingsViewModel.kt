@@ -11,6 +11,7 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import timber.log.Timber
 import javax.inject.Inject
 
 @HiltViewModel
@@ -26,6 +27,7 @@ class SyncSettingsViewModel @Inject constructor(
         observeSyncState()
         observeLastSyncTime()
         observeAutoDownloadSetting()
+        observeSyncOnCellularSetting()
     }
 
     private fun observeAutoDownloadSetting() {
@@ -40,6 +42,28 @@ class SyncSettingsViewModel @Inject constructor(
         viewModelScope.launch {
             settingsDataStore.setAutoDownloadAttachments(enabled)
         }
+    }
+
+    private fun observeSyncOnCellularSetting() {
+        viewModelScope.launch {
+            settingsDataStore.syncOnCellular.collect { enabled ->
+                _uiState.update { it.copy(syncOnCellular = enabled) }
+            }
+        }
+    }
+
+    fun setSyncOnCellular(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsDataStore.setSyncOnCellular(enabled)
+        }
+    }
+
+    /**
+     * One-time sync override - syncs now even if on cellular.
+     * Used for "Sync Anyway" button when sync is paused due to cellular restriction.
+     */
+    fun syncAnywayOneTime() {
+        syncService.syncAnywayOneTime()
     }
 
     private fun observeSyncState() {
@@ -76,8 +100,11 @@ class SyncSettingsViewModel @Inject constructor(
     }
 
     fun cleanSync() {
+        Timber.tag("SyncSettings").i("cleanSync() called from ViewModel")
         viewModelScope.launch {
-            syncService.performCleanSync()
+            Timber.tag("SyncSettings").i("cleanSync() launching coroutine")
+            val result = syncService.performCleanSync()
+            Timber.tag("SyncSettings").i("cleanSync() completed with result: $result")
         }
     }
 
@@ -116,5 +143,6 @@ data class SyncSettingsUiState(
     val syncState: SyncState = SyncState.Idle,
     val lastSyncTime: Long = 0L,
     val lastSyncFormatted: String = "Never",
-    val autoDownloadEnabled: Boolean = true
+    val autoDownloadEnabled: Boolean = true,
+    val syncOnCellular: Boolean = false
 )

@@ -46,6 +46,8 @@ import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
@@ -144,6 +146,9 @@ class ConversationsViewModel @Inject constructor(
     // Track if we've already started categorization this session
     private var hasStartedCategorization = false
 
+    // Mutex to prevent concurrent refresh operations (race condition causes IndexOutOfBoundsException)
+    private val refreshMutex = Mutex()
+
     // ============================================================================
     // SavedStateHandle-backed scroll position restoration (survives process death)
     // ============================================================================
@@ -187,9 +192,13 @@ class ConversationsViewModel @Inject constructor(
 
         // Load filter FIRST before loading conversations to avoid race condition
         viewModelScope.launch {
+            Timber.tag("ConvoDebug").w("VM: Starting initial filter load...")
             val initialFilter = settingsDataStore.conversationFilter.first()
+            Timber.tag("ConvoDebug").w("VM: Got filter, calling parseAndApplyFilter...")
             parseAndApplyFilter(initialFilter)
+            Timber.tag("ConvoDebug").w("VM: Filter applied, calling loadInitialConversations...")
             loadInitialConversations()
+            Timber.tag("ConvoDebug").w("VM: loadInitialConversations returned")
         }
 
         // Observe state from delegates
@@ -209,6 +218,7 @@ class ConversationsViewModel @Inject constructor(
         checkAndResumeSync()
         markExistingMmsDrafts()
         observeCategorizationTrigger()
+        observeFetchAllMessagesSettings()
     }
 
     // ============================================================================
@@ -410,6 +420,66 @@ class ConversationsViewModel @Inject constructor(
     }
 
     /**
+     * Observe settings needed for the "Fetch All Messages" feature in search.
+     * Tracks whether initial sync is complete and the cellular sync preference.
+     */
+    private fun observeFetchAllMessagesSettings() {
+        viewModelScope.launch {
+            combine(
+                settingsDataStore.initialSyncComplete,
+                settingsDataStore.syncOnCellular
+            ) { syncComplete, syncOnCellular ->
+                Pair(syncComplete, syncOnCellular)
+            }.collect { (syncComplete, syncOnCellular) ->
+                _uiState.update { it.copy(
+                    initialSyncComplete = syncComplete,
+                    syncOnCellular = syncOnCellular
+                ) }
+            }
+        }
+    }
+
+    // ============================================================================
+    // Fetch All Messages Dialog (shown in search when initial sync incomplete)
+    // ============================================================================
+
+    /**
+     * Show the "Fetch All Messages" confirmation dialog.
+     * Called when user taps the prompt in search results.
+     */
+    fun showFetchAllMessagesDialog() {
+        _uiState.update { it.copy(showFetchAllMessagesDialog = true) }
+    }
+
+    /**
+     * Dismiss the "Fetch All Messages" dialog without taking action.
+     */
+    fun dismissFetchAllMessagesDialog() {
+        _uiState.update { it.copy(showFetchAllMessagesDialog = false) }
+    }
+
+    /**
+     * Update the "sync via cellular" preference from within the dialog.
+     */
+    fun setSyncOnCellular(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsDataStore.setSyncOnCellular(enabled)
+        }
+    }
+
+    /**
+     * Confirm and start fetching all messages from the server.
+     * Triggers a full initial sync.
+     */
+    fun confirmFetchAllMessages() {
+        _uiState.update { it.copy(showFetchAllMessagesDialog = false) }
+        viewModelScope.launch {
+            Timber.tag("ConversationsViewModel").i("User confirmed fetch all messages - starting full sync")
+            syncService.performInitialSync()
+        }
+    }
+
+    /**
      * Parse the stored filter value and update UI state accordingly.
      * Status filters: "all", "unread", "spam", "unknown_senders", "known_senders"
      * Category filters: "category:TRANSACTIONS", "category:DELIVERIES", etc.
@@ -591,26 +661,26 @@ class ConversationsViewModel @Inject constructor(
 
     /**
      * Refresh all loaded pages.
+     *
+     * Uses a mutex to prevent concurrent refresh operations which can cause
+     * IndexOutOfBoundsException when the list changes size during a scroll.
      */
     private suspend fun refreshAllLoadedPages() {
         // Skip refresh while loading more to avoid items popping in during scroll
         if (_uiState.value.isLoadingMore) return
 
-        Timber.d("refreshAllLoadedPages: Starting refresh...")
-        val typingChats = observerDelegate.typingChats.value
-        val query = _searchQuery.value
-        val conversations = loadingDelegate.refreshAllLoadedPages(typingChats, query)
-        Timber.d("refreshAllLoadedPages: Got ${conversations.size} conversations")
+        // Use tryLock to skip refresh if another is already in progress
+        // This prevents race conditions where concurrent refreshes return different list sizes
+        if (!refreshMutex.tryLock()) return
 
-        // Log any potential duplicates by contactKey
-        val byContactKey = conversations.filter { !it.isGroup && it.contactKey.isNotBlank() }
-            .groupBy { it.contactKey }
-            .filter { it.value.size > 1 }
-        if (byContactKey.isNotEmpty()) {
-            Timber.w("refreshAllLoadedPages: DUPLICATES detected by contactKey: ${byContactKey.map { (key, convs) -> "$key -> ${convs.map { it.guid }}" }}")
+        try {
+            val typingChats = observerDelegate.typingChats.value
+            val query = _searchQuery.value
+            val conversations = loadingDelegate.refreshAllLoadedPages(typingChats, query)
+            _uiState.update { it.copy(conversations = conversations.toStable()) }
+        } finally {
+            refreshMutex.unlock()
         }
-
-        _uiState.update { it.copy(conversations = conversations.toStable()) }
     }
 
     /**

@@ -2,14 +2,19 @@ package com.bothbubbles.util
 
 import android.content.Context
 import android.net.ConnectivityManager
+import android.net.Network
 import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
  * Utility for checking network connectivity status.
- * Provides methods to determine if the device is on Wi-Fi, cellular, or has no connection.
+ * Provides both synchronous methods and reactive StateFlow for network state changes.
  */
 @Singleton
 class NetworkConnectivityManager @Inject constructor(
@@ -17,6 +22,52 @@ class NetworkConnectivityManager @Inject constructor(
 ) {
     private val connectivityManager: ConnectivityManager by lazy {
         context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    }
+
+    // Reactive network state
+    private val _networkState = MutableStateFlow(getCurrentNetworkState())
+    val networkState: StateFlow<NetworkState> = _networkState.asStateFlow()
+
+    init {
+        registerNetworkCallback()
+    }
+
+    private fun registerNetworkCallback() {
+        val request = NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .build()
+
+        connectivityManager.registerNetworkCallback(request, object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                updateNetworkState()
+            }
+
+            override fun onLost(network: Network) {
+                updateNetworkState()
+            }
+
+            override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
+                updateNetworkState()
+            }
+        })
+    }
+
+    private fun updateNetworkState() {
+        _networkState.value = getCurrentNetworkState()
+    }
+
+    private fun getCurrentNetworkState(): NetworkState {
+        val network = connectivityManager.activeNetwork
+        val capabilities = network?.let { connectivityManager.getNetworkCapabilities(it) }
+        val isConnected = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+        val type = when {
+            capabilities == null -> NetworkType.NONE
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> NetworkType.WIFI
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> NetworkType.CELLULAR
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> NetworkType.ETHERNET
+            else -> NetworkType.OTHER
+        }
+        return NetworkState(isConnected = isConnected, type = type)
     }
 
     /**
@@ -89,4 +140,12 @@ class NetworkConnectivityManager @Inject constructor(
         OTHER,
         NONE
     }
+
+    /**
+     * Data class representing the current network state.
+     */
+    data class NetworkState(
+        val isConnected: Boolean,
+        val type: NetworkType
+    )
 }

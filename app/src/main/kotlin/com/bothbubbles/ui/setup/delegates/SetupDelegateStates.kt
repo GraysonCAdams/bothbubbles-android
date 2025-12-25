@@ -39,7 +39,6 @@ data class SmsSetupState(
 
 data class SyncState(
     val messagesPerChat: Int = 500,
-    val skipEmptyChats: Boolean = true,
     val isSyncing: Boolean = false,
     val syncProgress: Float = 0f,
     val isSyncComplete: Boolean = false,

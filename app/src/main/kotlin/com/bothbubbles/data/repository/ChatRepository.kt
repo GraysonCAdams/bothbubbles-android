@@ -314,6 +314,21 @@ class ChatRepository @Inject constructor(
     }
 
     /**
+     * Get total chat count from server.
+     * Used for accurate progress tracking during initial sync.
+     *
+     * @return Result containing total chat count
+     */
+    suspend fun getServerChatCount(): Result<Int> = runCatching {
+        val response = api.getChatCount()
+        if (response.isSuccessful) {
+            response.body()?.data?.total ?: 0
+        } else {
+            throw Exception("Failed to get chat count: ${response.code()}")
+        }
+    }
+
+    /**
      * Fetch all chats from server and sync to local database.
      * Uses transactional operations to ensure data consistency.
      * Retries with exponential backoff on transient network errors.

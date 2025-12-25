@@ -237,7 +237,8 @@ object GroupContactSyncManager {
                         UnifiedChatEntity(
                             id = UnifiedChatIdGenerator.generate(),
                             normalizedAddress = chat.guid, // Use GUID as address for groups
-                            sourceId = chat.guid
+                            sourceId = chat.guid,
+                            isGroup = true // This file is specifically for group chats
                         )
                     )
                     // Update the chat with the new unified chat ID

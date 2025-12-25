@@ -33,5 +33,16 @@ data class ChatInfoState(
     /** Life360 location subtext (e.g., "At Home" or "123 Main St"), null if unavailable or stale */
     val locationSubtext: String? = null,
     /** Life360 member data for full-screen map navigation, null if not linked or unavailable */
-    val life360Member: Life360Member? = null
+    val life360Member: Life360Member? = null,
+    /**
+     * Whether the chat has a saved contact (for 1:1 chats).
+     * True if the participant has a cached display name from contacts.
+     * For groups, this is true if all participants have saved contacts.
+     */
+    val hasSavedContact: Boolean = false,
+    /**
+     * Whether this is a shortcode (typically 5-6 digit promotional numbers).
+     * Shortcodes should have limited features (e.g., no Reels button).
+     */
+    val isShortcode: Boolean = false
 )

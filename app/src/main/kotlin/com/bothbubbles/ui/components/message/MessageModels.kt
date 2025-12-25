@@ -88,10 +88,27 @@ sealed interface ChatListItem {
         override val contentType: Int = CONTENT_TYPE_TYPING
     }
 
+    /**
+     * Calendar event indicator shown inline with messages.
+     * Displays when a contact with a synced calendar has an event.
+     *
+     * Format: "Liz now has event WFH - All Day"
+     *
+     * These do NOT bump conversations or trigger notifications.
+     *
+     * @param event The calendar event item to display
+     */
+    @Stable
+    data class CalendarEvent(val event: CalendarEventItem) : ChatListItem {
+        override val key: String = "cal_${event.id}"
+        override val contentType: Int = CONTENT_TYPE_CALENDAR_EVENT
+    }
+
     companion object {
         const val CONTENT_TYPE_MESSAGE = 1
         const val CONTENT_TYPE_DATE_SEPARATOR = 2
         const val CONTENT_TYPE_TYPING = 3
+        const val CONTENT_TYPE_CALENDAR_EVENT = 4
     }
 }
 

@@ -10,6 +10,7 @@ import com.bothbubbles.data.local.db.dao.AutoShareContactDao
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.ChatParticipantDao
 import com.bothbubbles.data.local.db.dao.ChatQueryDao
+import com.bothbubbles.data.local.db.dao.CalendarEventOccurrenceDao
 import com.bothbubbles.data.local.db.dao.ContactCalendarDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.IMessageCacheDao
@@ -220,5 +221,11 @@ object DatabaseModule {
     @Singleton
     fun provideSocialMediaLinkDao(database: BothBubblesDatabase): SocialMediaLinkDao {
         return database.socialMediaLinkDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideCalendarEventOccurrenceDao(database: BothBubblesDatabase): CalendarEventOccurrenceDao {
+        return database.calendarEventOccurrenceDao()
     }
 }

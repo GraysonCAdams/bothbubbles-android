@@ -38,10 +38,6 @@ class SyncDelegate @AssistedInject constructor(
     private val _state = MutableStateFlow(SyncState())
     val state: StateFlow<SyncState> = _state.asStateFlow()
 
-    fun updateSkipEmptyChats(skip: Boolean) {
-        _state.update { it.copy(skipEmptyChats = skip) }
-    }
-
     fun completeSetupWithoutSync() {
         scope.launch {
             settingsDataStore.setSetupComplete(true)
@@ -54,6 +50,10 @@ class SyncDelegate @AssistedInject constructor(
             _state.update { it.copy(isSyncing = true, syncProgress = 0f, syncError = null) }
 
             try {
+                // Clear any leftover sync progress from previous runs
+                // This ensures we start fresh and don't skip chats as "already synced"
+                settingsDataStore.clearSyncProgress()
+
                 // Connect socket first
                 socketConnection.connect()
 

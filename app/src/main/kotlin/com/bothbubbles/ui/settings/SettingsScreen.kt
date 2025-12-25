@@ -73,6 +73,7 @@ fun SettingsScreen(
     onSocialMediaClick: () -> Unit = {},
     onStorageClick: () -> Unit = {},
     onAboutClick: () -> Unit = {},
+    onMediaContentClick: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -163,6 +164,7 @@ fun SettingsScreen(
             onSocialMediaClick = onSocialMediaClick,
             onStorageClick = onStorageClick,
             onAboutClick = onAboutClick,
+            onMediaContentClick = onMediaContentClick,
             onRequestContactsPermission = {
                 contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
             },
@@ -203,6 +205,7 @@ fun SettingsContent(
     onSocialMediaClick: () -> Unit = {},
     onStorageClick: () -> Unit = {},
     onAboutClick: () -> Unit,
+    onMediaContentClick: () -> Unit = {},
     onRequestContactsPermission: () -> Unit = {},
     viewModel: SettingsViewModel
 ) {
@@ -330,7 +333,8 @@ fun SettingsContent(
                             SettingsSwitch(
                                 checked = uiState.enablePrivateApi && uiState.isServerConfigured,
                                 onCheckedChange = { viewModel.setEnablePrivateApi(it) },
-                                enabled = uiState.isServerConfigured && !isConnecting
+                                enabled = uiState.isServerConfigured && !isConnecting,
+                                showIcons = false
                             )
                         }
                     } else null
@@ -579,11 +583,11 @@ fun SettingsContent(
         }
 
         // ═══════════════════════════════════════════════════════════════
-        // SECTION 5: Messaging Features
-        // Focus: Enhancements to the composing and sending experience
+        // SECTION 5: Messaging
+        // Focus: Composing and sending enhancements
         // ═══════════════════════════════════════════════════════════════
         item {
-            SettingsSectionTitle(title = "Messaging features")
+            SettingsSectionTitle(title = "Messaging")
         }
 
         item {
@@ -610,6 +614,28 @@ fun SettingsContent(
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
+                // Media & content (new combined page)
+                SettingsMenuItem(
+                    icon = Icons.Default.PermMedia,
+                    title = "Media & content",
+                    subtitle = "Link previews, social media videos, image quality",
+                    onClick = onMediaContentClick
+                )
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // SECTION 5.5: Sharing & Social
+        // Focus: Location sharing and social integrations
+        // ═══════════════════════════════════════════════════════════════
+        item {
+            SettingsSectionTitle(title = "Sharing & Social")
+        }
+
+        item {
+            SettingsCard(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+            ) {
                 // ETA Sharing
                 SettingsMenuItem(
                     icon = Icons.Outlined.Navigation,
@@ -624,7 +650,7 @@ fun SettingsContent(
                 SettingsMenuItem(
                     icon = Icons.Outlined.LocationOn,
                     title = "Life360",
-                    subtitle = "Show friends and family members locations",
+                    subtitle = "Show friends and family locations",
                     onClick = onLife360Click
                 )
 
@@ -636,48 +662,6 @@ fun SettingsContent(
                     title = "Calendar integrations",
                     subtitle = "Show contact calendars in chat headers",
                     onClick = onCalendarClick
-                )
-
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                // Link previews toggle
-                SettingsMenuItem(
-                    icon = Icons.Default.Link,
-                    title = "Link previews",
-                    subtitle = if (uiState.linkPreviewsEnabled) "Show rich previews for URLs" else "Disabled to improve performance",
-                    onClick = { viewModel.setLinkPreviewsEnabled(!uiState.linkPreviewsEnabled) },
-                    trailingContent = {
-                        SettingsSwitch(
-                            checked = uiState.linkPreviewsEnabled,
-                            onCheckedChange = { viewModel.setLinkPreviewsEnabled(it) },
-                            showIcons = false
-                        )
-                    }
-                )
-
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                // Social media videos
-                SettingsMenuItem(
-                    icon = Icons.Default.VideoLibrary,
-                    title = "Social media videos",
-                    subtitle = when {
-                        uiState.tiktokDownloaderEnabled && uiState.instagramDownloaderEnabled -> "TikTok and Instagram enabled"
-                        uiState.tiktokDownloaderEnabled -> "TikTok enabled"
-                        uiState.instagramDownloaderEnabled -> "Instagram enabled"
-                        else -> "Play videos inline in chat"
-                    },
-                    onClick = onSocialMediaClick
-                )
-
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                // Image quality
-                SettingsMenuItem(
-                    icon = Icons.Default.HighQuality,
-                    title = "Image quality",
-                    subtitle = "Compression settings for photo attachments",
-                    onClick = onImageQualityClick
                 )
             }
         }
@@ -814,49 +798,6 @@ fun SettingsContent(
                     title = "Export messages",
                     subtitle = "Save conversations as HTML or PDF",
                     onClick = onExportClick
-                )
-            }
-        }
-
-        // ═══════════════════════════════════════════════════════════════
-        // SECTION 7.5: Debug Tools (Temporary)
-        // Focus: Developer debug options
-        // ═══════════════════════════════════════════════════════════════
-        item {
-            SettingsSectionTitle(title = "Debug tools")
-        }
-
-        item {
-            var showFindMyDialog by remember { mutableStateOf(false) }
-
-            SettingsCard(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-            ) {
-                SettingsMenuItem(
-                    icon = Icons.Default.LocationOn,
-                    title = "Find My Debug",
-                    subtitle = "View Find My data from server",
-                    onClick = {
-                        viewModel.fetchFindMyData()
-                        showFindMyDialog = true
-                    },
-                    enabled = uiState.isServerConfigured,
-                    onDisabledClick = {
-                        showDisabledSnackbar("Configure server first")
-                    }
-                )
-            }
-
-            if (showFindMyDialog) {
-                FindMyDebugDialog(
-                    devices = uiState.findMyDevices,
-                    friends = uiState.findMyFriends,
-                    isLoading = uiState.findMyLoading,
-                    error = uiState.findMyError,
-                    onDismiss = {
-                        showFindMyDialog = false
-                        viewModel.clearFindMyData()
-                    }
                 )
             }
         }

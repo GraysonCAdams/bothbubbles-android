@@ -358,6 +358,7 @@ class MessageEventHandler @Inject constructor(
 
     /**
      * Extract the first name from a full name, excluding emojis and non-letter characters.
+     * If the input is a phone number (no letters), returns the full input unchanged.
      */
     private fun extractFirstName(fullName: String): String {
         val words = fullName.trim().split(WHITESPACE_REGEX)
@@ -367,7 +368,8 @@ class MessageEventHandler @Inject constructor(
                 return cleaned
             }
         }
-        return words.firstOrNull()?.filter { it.isLetterOrDigit() } ?: fullName
+        // No letters found - this is likely a phone number, return as-is
+        return fullName
     }
 
     /**

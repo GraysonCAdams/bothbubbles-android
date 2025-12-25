@@ -276,3 +276,96 @@ private fun CalendarEditDialog(
         }
     )
 }
+
+/**
+ * Content-only composable for embedding in the settings panel.
+ * Excludes Scaffold and TopAppBar.
+ */
+@Composable
+fun CalendarSettingsContent(
+    viewModel: CalendarSettingsViewModel = hiltViewModel()
+) {
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    var showEditDialog by remember { mutableStateOf<CalendarAssociationWithContact?>(null) }
+
+    when {
+        uiState.isLoading -> {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator()
+            }
+        }
+        uiState.associations.isEmpty() -> {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.padding(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.CalendarMonth,
+                        contentDescription = null,
+                        modifier = Modifier.size(64.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "No Calendar Associations",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Associate calendars with contacts from their conversation details to show events in chat headers.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+                }
+            }
+        }
+        else -> {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(vertical = 8.dp)
+            ) {
+                item {
+                    Text(
+                        text = "Calendar events from these contacts will appear in chat headers.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                    )
+                }
+
+                items(
+                    items = uiState.associations,
+                    key = { it.association.linkedAddress }
+                ) { item ->
+                    CalendarAssociationItem(
+                        item = item,
+                        onEditClick = { showEditDialog = item },
+                        onRemoveClick = { viewModel.removeAssociation(item.association.linkedAddress) }
+                    )
+                }
+            }
+        }
+    }
+
+    // Edit dialog
+    showEditDialog?.let { item ->
+        CalendarEditDialog(
+            currentCalendarId = item.association.calendarId,
+            contactName = item.contactDisplayName ?: PhoneNumberFormatter.format(item.association.linkedAddress),
+            onCalendarSelected = { calendar ->
+                viewModel.updateAssociation(item.association.linkedAddress, calendar)
+                showEditDialog = null
+            },
+            onDismiss = { showEditDialog = null },
+            getCalendars = viewModel::getAvailableCalendars
+        )
+    }
+}

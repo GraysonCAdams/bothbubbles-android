@@ -18,9 +18,10 @@ data class StorageBreakdown(
     val videos: Long = 0L,
     val documents: Long = 0L,
     val linkPreviews: Long = 0L,
+    val socialMedia: Long = 0L,
     val other: Long = 0L
 ) {
-    val total: Long get() = images + videos + documents + linkPreviews + other
+    val total: Long get() = images + videos + documents + linkPreviews + socialMedia + other
 
     companion object {
         val EMPTY = StorageBreakdown()
@@ -35,6 +36,7 @@ enum class StorageCategory {
     VIDEOS,
     DOCUMENTS,
     LINK_PREVIEWS,
+    SOCIAL_MEDIA,
     ALL
 }
 
@@ -64,8 +66,9 @@ class StorageManagementService @Inject constructor(
             "mp3", "m4a", "wav", "aac", "ogg", "flac", "wma"
         )
 
-        // Link preview cache directory name
+        // Cache directory names
         private const val LINK_PREVIEW_CACHE_DIR = "link_previews"
+        private const val SOCIAL_MEDIA_CACHE_DIR = "social_media_videos"
         private const val COIL_CACHE_DIR = "image_cache"
     }
 
@@ -77,6 +80,7 @@ class StorageManagementService @Inject constructor(
         var videos = 0L
         var documents = 0L
         var linkPreviews = 0L
+        var socialMedia = 0L
         var other = 0L
 
         try {
@@ -87,6 +91,7 @@ class StorageManagementService @Inject constructor(
                 videos += cacheBreakdown.videos
                 documents += cacheBreakdown.documents
                 linkPreviews += cacheBreakdown.linkPreviews
+                socialMedia += cacheBreakdown.socialMedia
                 other += cacheBreakdown.other
             }
 
@@ -96,6 +101,7 @@ class StorageManagementService @Inject constructor(
                 images += filesBreakdown.images
                 videos += filesBreakdown.videos
                 documents += filesBreakdown.documents
+                socialMedia += filesBreakdown.socialMedia
                 other += filesBreakdown.other
             }
 
@@ -106,6 +112,7 @@ class StorageManagementService @Inject constructor(
                 videos += externalBreakdown.videos
                 documents += externalBreakdown.documents
                 linkPreviews += externalBreakdown.linkPreviews
+                socialMedia += externalBreakdown.socialMedia
                 other += externalBreakdown.other
             }
 
@@ -125,6 +132,7 @@ class StorageManagementService @Inject constructor(
             videos = videos,
             documents = documents,
             linkPreviews = linkPreviews,
+            socialMedia = socialMedia,
             other = other
         )
     }
@@ -134,6 +142,7 @@ class StorageManagementService @Inject constructor(
         var videos = 0L
         var documents = 0L
         var linkPreviews = 0L
+        var socialMedia = 0L
         var other = 0L
 
         try {
@@ -143,8 +152,11 @@ class StorageManagementService @Inject constructor(
                     val extension = file.extension.lowercase()
                     val parentName = file.parentFile?.name ?: ""
 
+                    // Check if it's in social media cache (must check first - these are mp4 files)
+                    if (parentName.contains(SOCIAL_MEDIA_CACHE_DIR, ignoreCase = true)) {
+                        socialMedia += size
                     // Check if it's in link preview cache
-                    if (parentName.contains(LINK_PREVIEW_CACHE_DIR, ignoreCase = true)) {
+                    } else if (parentName.contains(LINK_PREVIEW_CACHE_DIR, ignoreCase = true)) {
                         linkPreviews += size
                     } else when {
                         IMAGE_EXTENSIONS.contains(extension) -> images += size
@@ -164,6 +176,7 @@ class StorageManagementService @Inject constructor(
             videos = videos,
             documents = documents,
             linkPreviews = linkPreviews,
+            socialMedia = socialMedia,
             other = other
         )
     }
@@ -194,6 +207,7 @@ class StorageManagementService @Inject constructor(
             StorageCategory.VIDEOS -> clearVideos()
             StorageCategory.DOCUMENTS -> clearDocuments()
             StorageCategory.LINK_PREVIEWS -> clearLinkPreviews()
+            StorageCategory.SOCIAL_MEDIA -> clearSocialMedia()
         }
     }
 
@@ -296,6 +310,26 @@ class StorageManagementService @Inject constructor(
             Timber.d("Cleared link previews: freed ${formatBytes(freedBytes)}")
         } catch (e: Exception) {
             Timber.e(e, "Error clearing link previews")
+        }
+
+        return freedBytes
+    }
+
+    private fun clearSocialMedia(): Long {
+        var freedBytes = 0L
+
+        try {
+            // Find and clear social media video cache directories
+            context.cacheDir?.let { cacheDir ->
+                freedBytes += clearDirectoriesMatching(cacheDir, SOCIAL_MEDIA_CACHE_DIR)
+            }
+            context.externalCacheDir?.let { externalCache ->
+                freedBytes += clearDirectoriesMatching(externalCache, SOCIAL_MEDIA_CACHE_DIR)
+            }
+
+            Timber.d("Cleared social media: freed ${formatBytes(freedBytes)}")
+        } catch (e: Exception) {
+            Timber.e(e, "Error clearing social media")
         }
 
         return freedBytes
