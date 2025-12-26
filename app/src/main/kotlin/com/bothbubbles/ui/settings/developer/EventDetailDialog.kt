@@ -9,7 +9,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import com.bothbubbles.core.design.theme.AppTextStyles
 import com.bothbubbles.services.developer.DeveloperEvent
 import com.bothbubbles.services.developer.EventSource
 
@@ -38,9 +38,10 @@ internal fun EventDetailDialog(
                             EventSource.FCM -> "FCM"
                         },
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.Monospace,
+                        style = AppTextStyles.devText.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        ),
                         color = when (event.source) {
                             EventSource.SOCKET -> MaterialTheme.colorScheme.primary
                             EventSource.FCM -> MaterialTheme.colorScheme.tertiary

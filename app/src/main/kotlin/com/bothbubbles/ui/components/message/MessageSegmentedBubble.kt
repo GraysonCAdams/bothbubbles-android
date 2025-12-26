@@ -82,6 +82,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.bothbubbles.core.design.theme.AppTextStyles
 import com.bothbubbles.data.local.db.entity.MessageSource
 import com.bothbubbles.ui.components.attachment.AttachmentContent
 import com.bothbubbles.ui.components.attachment.BorderlessMediaContent
@@ -911,7 +912,7 @@ internal fun TextBubbleSegment(
 
             // Text style based on emoji analysis (computed before Surface)
             val textStyle = if (isLargeEmoji) {
-                MaterialTheme.typography.bodyLarge.copy(fontSize = 48.sp)
+                AppTextStyles.emojiLarge
             } else {
                 MaterialTheme.typography.bodyLarge
             }

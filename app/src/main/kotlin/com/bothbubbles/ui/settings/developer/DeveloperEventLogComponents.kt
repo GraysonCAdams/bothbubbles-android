@@ -14,7 +14,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import com.bothbubbles.core.design.theme.AppTextStyles
 import com.bothbubbles.util.HapticUtils
 import com.bothbubbles.services.developer.ConnectionMode
 import com.bothbubbles.services.developer.DeveloperEvent
@@ -78,8 +78,7 @@ internal fun ConnectionStatusHeader(
                 Text(
                     text = if (isAppInForeground) "FG" else "BG",
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
+                    style = AppTextStyles.devText.copy(fontWeight = FontWeight.Bold),
                     color = if (isAppInForeground)
                         MaterialTheme.colorScheme.onPrimary
                     else
@@ -213,9 +212,10 @@ internal fun EventLogItem(
                     EventSource.FCM -> "FCM"
                 },
                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.Monospace,
+                style = AppTextStyles.devText.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace
+                ),
                 color = when (event.source) {
                     EventSource.SOCKET -> MaterialTheme.colorScheme.primary
                     EventSource.FCM -> MaterialTheme.colorScheme.tertiary
@@ -242,8 +242,7 @@ internal fun EventLogItem(
 
         Text(
             text = event.formattedTime,
-            fontSize = 10.sp,
-            fontFamily = FontFamily.Monospace,
+            style = AppTextStyles.devText.copy(fontFamily = FontFamily.Monospace),
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }

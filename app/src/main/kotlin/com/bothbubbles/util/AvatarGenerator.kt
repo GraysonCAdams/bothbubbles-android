@@ -61,12 +61,14 @@ object AvatarGenerator {
     }
 
     /**
-     * Check if name looks like a phone number (7+ digits, only phone chars).
+     * Check if name looks like a phone number (7+ digits, no letters).
      * When true, avatar should show a Person icon instead of initials.
      */
     fun isPhoneNumber(name: String): Boolean {
-        val digitsOnly = name.replace(Regex("[^0-9]"), "")
-        return digitsOnly.length >= 7 && name.matches(Regex("^[+\\d\\s()\\-]+$"))
+        val digitsOnly = name.filter { it.isDigit() }
+        val hasLetters = name.any { it.isLetter() }
+        // A phone number has 7+ digits and no letters (separators can vary)
+        return digitsOnly.length >= 7 && !hasLetters
     }
 
     /**

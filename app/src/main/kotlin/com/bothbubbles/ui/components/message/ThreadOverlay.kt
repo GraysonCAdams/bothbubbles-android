@@ -35,6 +35,7 @@ import com.bothbubbles.ui.chat.composer.ComposerEvent
 import com.bothbubbles.ui.chat.composer.ComposerPanel
 import com.bothbubbles.ui.chat.composer.ComposerState
 import com.bothbubbles.ui.chat.delegates.ChatThreadDelegate
+import com.bothbubbles.core.design.theme.AppTextStyles
 import com.bothbubbles.ui.theme.BothBubblesTheme
 import java.util.UUID
 
@@ -420,7 +421,7 @@ private fun HeaderReactionBadge(
         ) {
             Text(
                 text = tapback.emoji,
-                fontSize = 14.sp
+                style = AppTextStyles.emojiSmall
             )
             if (count > 1) {
                 Text(
@@ -470,7 +471,7 @@ private fun StackedReactionDetailsSheet(
         ) {
             Text(
                 text = tapback.emoji,
-                fontSize = 28.sp
+                style = AppTextStyles.emojiMedium
             )
             Spacer(modifier = Modifier.width(16.dp))
             Text(

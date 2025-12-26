@@ -49,6 +49,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -89,6 +90,20 @@ fun Life360SettingsScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
+    // Track login method and disclaimer state for when webview is showing
+    var loginMethod by rememberSaveable { mutableStateOf(LoginMethod.NONE) }
+    var showWebViewDisclaimer by rememberSaveable { mutableStateOf(false) }
+
+    // Show disclaimer dialog (from webview warning icon in top bar)
+    if (showWebViewDisclaimer) {
+        Life360DisclaimerDialog(
+            isConnected = false,
+            onProceed = { showWebViewDisclaimer = false },
+            onUnlink = { /* Not applicable for non-connected state */ },
+            onDismiss = { showWebViewDisclaimer = false }
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -99,6 +114,17 @@ fun Life360SettingsScreen(
                     }
                 },
                 actions = {
+                    // Show warning icon when webview is showing
+                    if (!uiState.isAuthenticated && loginMethod == LoginMethod.WEBVIEW) {
+                        IconButton(onClick = { showWebViewDisclaimer = true }) {
+                            Icon(
+                                imageVector = Icons.Default.WarningAmber,
+                                contentDescription = "View disclaimer",
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
                     if (uiState.isAuthenticated) {
                         IconButton(
                             onClick = viewModel::syncMembers,
@@ -122,6 +148,8 @@ fun Life360SettingsScreen(
         Box(modifier = Modifier.padding(padding)) {
             if (!uiState.isAuthenticated) {
                 TokenEntryScreen(
+                    loginMethod = loginMethod,
+                    onLoginMethodChanged = { loginMethod = it },
                     onTokenSubmit = viewModel::storeToken
                 )
             } else {
@@ -152,11 +180,13 @@ fun Life360SettingsScreen(
 /**
  * Life360 settings content for use in SettingsPanel.
  * Shows token entry if not authenticated, otherwise shows settings.
+ *
+ * @param onShowingWebView Callback when the webview visibility changes (for panel to show warning icon)
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun Life360SettingsContent(
     modifier: Modifier = Modifier,
+    onShowingWebView: (Boolean) -> Unit = {},
     viewModel: Life360SettingsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -169,9 +199,19 @@ fun Life360SettingsContent(
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
 
+    // Track login method for webview visibility
+    var loginMethod by rememberSaveable { mutableStateOf(LoginMethod.NONE) }
+
+    // Notify parent when webview visibility changes
+    LaunchedEffect(loginMethod) {
+        onShowingWebView(loginMethod == LoginMethod.WEBVIEW)
+    }
+
     Box(modifier = modifier.fillMaxSize()) {
         if (!uiState.isAuthenticated) {
             TokenEntryScreen(
+                loginMethod = loginMethod,
+                onLoginMethodChanged = { loginMethod = it },
                 onTokenSubmit = viewModel::storeToken
             )
         } else {
@@ -207,7 +247,7 @@ fun Life360SettingsContent(
 /**
  * Login method selection for Life360.
  */
-private enum class LoginMethod {
+internal enum class LoginMethod {
     NONE,
     WEBVIEW,
     MANUAL
@@ -215,14 +255,14 @@ private enum class LoginMethod {
 
 @Composable
 private fun TokenEntryScreen(
+    loginMethod: LoginMethod,
+    onLoginMethodChanged: (LoginMethod) -> Unit,
     onTokenSubmit: (String) -> Unit
 ) {
-    var loginMethod by rememberSaveable { mutableStateOf(LoginMethod.NONE) }
     var manualToken by rememberSaveable { mutableStateOf("") }
     var showManualEntry by rememberSaveable { mutableStateOf(false) }
     var showDisclaimer by rememberSaveable { mutableStateOf(false) }
     var pendingAction by rememberSaveable { mutableStateOf<String?>(null) } // "webview" or "manual"
-    var showWebViewDisclaimer by rememberSaveable { mutableStateOf(false) }
 
     // Show disclaimer dialog (for pre-login confirmation)
     if (showDisclaimer) {
@@ -231,7 +271,7 @@ private fun TokenEntryScreen(
             onProceed = {
                 showDisclaimer = false
                 when (pendingAction) {
-                    "webview" -> loginMethod = LoginMethod.WEBVIEW
+                    "webview" -> onLoginMethodChanged(LoginMethod.WEBVIEW)
                     "manual" -> onTokenSubmit(manualToken)
                 }
                 pendingAction = null
@@ -244,21 +284,10 @@ private fun TokenEntryScreen(
         )
     }
 
-    // Show disclaimer dialog (from webview warning icon)
-    if (showWebViewDisclaimer) {
-        Life360DisclaimerDialog(
-            isConnected = false,
-            onProceed = { showWebViewDisclaimer = false },
-            onUnlink = { /* Not applicable for non-connected state */ },
-            onDismiss = { showWebViewDisclaimer = false }
-        )
-    }
-
     when (loginMethod) {
         LoginMethod.WEBVIEW -> {
             Life360LoginWebView(
-                onTokenExtracted = onTokenSubmit,
-                onShowDisclaimer = { showWebViewDisclaimer = true }
+                onTokenExtracted = onTokenSubmit
             )
         }
 

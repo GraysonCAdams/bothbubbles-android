@@ -40,7 +40,7 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import com.bothbubbles.core.design.theme.AppTextStyles
 import com.bothbubbles.ui.components.message.Tapback
 import com.bothbubbles.util.HapticUtils
 import com.bothbubbles.util.rememberThrottledHaptic
@@ -305,7 +305,7 @@ private fun ReactionEmoji(
     ) {
         Text(
             text = tapback.emoji,
-            fontSize = 22.sp,
+            style = AppTextStyles.emojiSelector,
             textAlign = TextAlign.Center
         )
     }

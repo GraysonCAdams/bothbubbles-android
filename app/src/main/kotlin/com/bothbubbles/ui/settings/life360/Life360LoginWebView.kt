@@ -6,21 +6,19 @@ import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -43,11 +41,9 @@ private const val LIFE360_LOGIN_URL = "https://www.life360.com/login"
  * Intercepts the OAuth token response when the user completes login
  * and extracts the access_token automatically via JavaScript injection.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun Life360LoginWebView(
     onTokenExtracted: (String) -> Unit,
-    onShowDisclaimer: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var isLoading by rememberSaveable { mutableStateOf(true) }
@@ -64,42 +60,41 @@ fun Life360LoginWebView(
         }
     }
 
-    Column(modifier = modifier.fillMaxSize()) {
-        // Top bar with warning icon
-        TopAppBar(
-            title = { Text("Sign in to Life360") },
-            actions = {
-                IconButton(onClick = onShowDisclaimer) {
-                    Icon(
-                        imageVector = Icons.Default.WarningAmber,
-                        contentDescription = "View disclaimer",
-                        tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-            }
+    Box(modifier = modifier.fillMaxSize()) {
+        Life360WebViewContent(
+            onWebViewCreated = { webView = it },
+            onLoadingChanged = { isLoading = it },
+            onProgressChanged = { loadingProgress = it },
+            onTokenExtracted = onTokenExtracted
         )
 
-        // Loading indicator
+        // Full-screen loading overlay while page loads
         if (isLoading) {
-            LinearProgressIndicator(
-                progress = { loadingProgress },
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
-
-        Box(modifier = Modifier.weight(1f)) {
-            Life360WebViewContent(
-                onWebViewCreated = { webView = it },
-                onLoadingChanged = { isLoading = it },
-                onProgressChanged = { loadingProgress = it },
-                onTokenExtracted = onTokenExtracted
-            )
-
-            if (isLoading && loadingProgress < 0.1f) {
-                CircularProgressIndicator(
-                    modifier = Modifier.align(Alignment.Center)
-                )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.surface),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(48.dp)
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "Loading Life360...",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    LinearProgressIndicator(
+                        progress = { loadingProgress },
+                        modifier = Modifier.fillMaxWidth(0.6f)
+                    )
+                }
             }
         }
     }

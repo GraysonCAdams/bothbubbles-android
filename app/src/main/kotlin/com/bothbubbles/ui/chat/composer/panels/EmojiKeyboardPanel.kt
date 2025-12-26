@@ -33,6 +33,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import com.bothbubbles.core.design.theme.AppTextStyles
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -282,7 +283,7 @@ private fun EmojiItem(
     ) {
         Text(
             text = emoji,
-            fontSize = 24.sp,
+            style = AppTextStyles.emojiPicker,
             textAlign = TextAlign.Center
         )
     }

@@ -200,6 +200,7 @@ fun SettingsMenuItem(
     title: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    iconTint: Color? = null,
     subtitle: String? = null,
     enabled: Boolean = true,
     onDisabledClick: (() -> Unit)? = null,
@@ -304,16 +305,36 @@ fun SettingsMenuItem(
             }
         } else null,
         leadingContent = {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                modifier = Modifier.size(24.dp),
-                tint = if (enabled) {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+            if (iconTint != null) {
+                // Circular background with white icon
+                val bgColor = if (enabled) iconTint else iconTint.copy(alpha = 0.6f)
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(bgColor),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        modifier = Modifier.size(22.dp),
+                        tint = Color.White
+                    )
                 }
-            )
+            } else {
+                // Default: no background, tinted icon
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp),
+                    tint = if (enabled) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                    }
+                )
+            }
         },
         trailingContent = when {
             isLoading -> {
@@ -561,4 +582,38 @@ fun SettingsSwitch(
             }
         } else null
     )
+}
+
+/**
+ * Semantic icon colors for settings groups.
+ * Each color group should only appear in one settings section.
+ * Multiple color groups can exist within a single settings section.
+ *
+ * Colors are vibrant and designed to work as circular icon backgrounds.
+ * Colors chosen to match the semantic meaning of each section.
+ */
+object SettingsIconColors {
+    // Connectivity section - cloud/network (trustworthy blue)
+    val Connectivity = Color(0xFF007AFF)  // iOS Blue
+
+    // Notifications section - attention-grabbing (warm orange)
+    val Notifications = Color(0xFFFF9500)  // iOS Orange
+
+    // Appearance section - creative/visual (vibrant purple)
+    val Appearance = Color(0xFFAF52DE)  // iOS Purple
+
+    // Messaging section - communication (friendly teal)
+    val Messaging = Color(0xFF32ADE6)  // iOS Light Blue
+
+    // Location & Social section - outdoors/maps (natural green)
+    val Location = Color(0xFF34C759)  // iOS Green
+
+    // Privacy section - security/caution (alert red)
+    val Privacy = Color(0xFFFF3B30)  // iOS Red
+
+    // Data section - storage/archival (deep indigo)
+    val Data = Color(0xFF5856D6)  // iOS Indigo
+
+    // About section - neutral info (subtle grey)
+    val About = Color(0xFF8E8E93)  // iOS Grey
 }

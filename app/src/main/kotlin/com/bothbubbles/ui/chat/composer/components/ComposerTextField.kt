@@ -2,6 +2,7 @@ package com.bothbubbles.ui.chat.composer.components
 
 import android.content.Context
 import android.graphics.drawable.GradientDrawable
+import android.net.Uri
 import android.text.Editable
 import android.text.InputType
 import android.text.SpannableStringBuilder
@@ -16,6 +17,9 @@ import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import androidx.core.content.res.ResourcesCompat
+import androidx.core.view.ContentInfoCompat
+import androidx.core.view.OnReceiveContentListener
+import androidx.core.view.ViewCompat
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -73,6 +77,7 @@ import timber.log.Timber
  * @param onFocusRequested Callback when focus request has been handled (to clear the trigger)
  * @param leadingContent Optional composable for content before the text field
  * @param trailingContent Optional composable for content after the text field
+ * @param onRichContentReceived Callback when keyboard sends rich content (GIFs, images)
  * @param modifier Modifier for the outer container
  */
 @Composable
@@ -89,6 +94,7 @@ fun ComposerTextField(
     onFocusRequested: () -> Unit = {},
     leadingContent: @Composable (() -> Unit)? = null,
     trailingContent: @Composable (() -> Unit)? = null,
+    onRichContentReceived: ((List<Uri>) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val inputColors = BothBubblesTheme.bubbleColors
@@ -134,7 +140,8 @@ fun ComposerTextField(
             // IMPORTANT: Only sync if the external text is genuinely different AND
             // not a substring of what the user has typed (which would indicate we're
             // behind due to rapid typing). This prevents losing characters.
-            val needsSync = currentText != text && !currentText.startsWith(text)
+            // Special case: Empty text always syncs (intentional clear from send/delete).
+            val needsSync = currentText != text && (text.isEmpty() || !currentText.startsWith(text))
 
             if (needsSync) {
                 Timber.d("ComposerTextField: syncing external text change, current='$currentText', new='$text'")
@@ -226,7 +233,8 @@ fun ComposerTextField(
                             if (clampedCount != lineCount) {
                                 lineCount = clampedCount
                             }
-                        }
+                        },
+                        onRichContentReceived = onRichContentReceived
                     ).also { editTextRef = it }
                 },
                 update = { editText ->
@@ -259,7 +267,18 @@ fun ComposerTextField(
 }
 
 /**
- * Creates a native EditText with spell checking enabled.
+ * MIME types accepted from keyboards for rich content (GIFs, images).
+ */
+private val KEYBOARD_CONTENT_MIME_TYPES = arrayOf(
+    "image/gif",
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+    "image/*"
+)
+
+/**
+ * Creates a native EditText with spell checking enabled and keyboard rich content support.
  */
 private fun createSpellCheckEditText(
     context: Context,
@@ -275,7 +294,8 @@ private fun createSpellCheckEditText(
     onTextChange: (String) -> Unit,
     onTextChangedWithCursor: ((String, Int) -> Unit)?,
     onFocusChanged: (Boolean) -> Unit,
-    onLineCountChanged: (Int) -> Unit
+    onLineCountChanged: (Int) -> Unit,
+    onRichContentReceived: ((List<Uri>) -> Unit)?
 ): EditText {
     return EditText(context).apply {
         // Layout params
@@ -361,6 +381,46 @@ private fun createSpellCheckEditText(
             }
         } catch (e: Exception) {
             Timber.w(e, "Could not set cursor color")
+        }
+
+        // Set up rich content receiver for keyboard GIFs/images
+        // This uses AndroidX backward-compatible API (works on API 21+)
+        if (onRichContentReceived != null) {
+            ViewCompat.setOnReceiveContentListener(
+                this,
+                KEYBOARD_CONTENT_MIME_TYPES,
+                object : OnReceiveContentListener {
+                    override fun onReceiveContent(
+                        view: View,
+                        payload: ContentInfoCompat
+                    ): ContentInfoCompat? {
+                        // Split payload into content we can handle vs content we can't
+                        val split = payload.partition { item ->
+                            item.uri != null
+                        }
+                        val uriContent = split.first
+                        val remaining = split.second
+
+                        // Process URIs we received
+                        if (uriContent != null) {
+                            val uris = mutableListOf<Uri>()
+                            val clip = uriContent.clip
+                            for (i in 0 until clip.itemCount) {
+                                clip.getItemAt(i).uri?.let { uri ->
+                                    uris.add(uri)
+                                    Timber.d("Received rich content from keyboard: $uri")
+                                }
+                            }
+                            if (uris.isNotEmpty()) {
+                                onRichContentReceived(uris)
+                            }
+                        }
+
+                        // Return any content we couldn't handle (let system process it)
+                        return remaining
+                    }
+                }
+            )
         }
     }
 }

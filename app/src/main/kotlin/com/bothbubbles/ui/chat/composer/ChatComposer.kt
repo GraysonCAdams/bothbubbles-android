@@ -229,6 +229,7 @@ fun ChatComposer(
                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
                     )
                 },
+                onMediaSelected = onMediaSelected,
                 onSendButtonBoundsChanged = onSendButtonBoundsChanged,
                 shouldRequestFocus = shouldRequestFocus,
                 onFocusRequested = onFocusRequested,
@@ -286,6 +287,7 @@ private fun MainInputRow(
     state: ComposerState,
     onEvent: (ComposerEvent) -> Unit,
     onGalleryClick: () -> Unit,
+    onMediaSelected: (List<Uri>) -> Unit,
     onSendButtonBoundsChanged: (androidx.compose.ui.geometry.Rect) -> Unit = {},
     shouldRequestFocus: Boolean = false,
     onFocusRequested: () -> Unit = {},
@@ -325,6 +327,7 @@ private fun MainInputRow(
                         state = state,
                         onEvent = onEvent,
                         onGalleryClick = onGalleryClick,
+                        onMediaSelected = onMediaSelected,
                         shouldRequestFocus = shouldRequestFocus,
                         onFocusRequested = onFocusRequested
                     )
@@ -385,6 +388,7 @@ private fun TextInputContent(
     state: ComposerState,
     onEvent: (ComposerEvent) -> Unit,
     onGalleryClick: () -> Unit,
+    onMediaSelected: (List<Uri>) -> Unit,
     shouldRequestFocus: Boolean = false,
     onFocusRequested: () -> Unit = {}
 ) {
@@ -418,7 +422,8 @@ private fun TextInputContent(
                 isEmojiActive = state.isEmojiPickerActive,
                 isEnabled = !state.smsInputBlocked
             )
-        }
+        },
+        onRichContentReceived = onMediaSelected
     )
 }
 

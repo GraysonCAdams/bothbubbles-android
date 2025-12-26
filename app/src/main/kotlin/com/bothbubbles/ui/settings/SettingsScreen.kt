@@ -9,10 +9,23 @@ import android.net.Uri
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -22,9 +35,17 @@ import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.Navigation
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -44,6 +65,7 @@ import kotlinx.coroutines.launch
 import com.bothbubbles.services.sound.SoundTheme
 import com.bothbubbles.ui.settings.components.BadgeStatus
 import com.bothbubbles.ui.settings.components.SettingsCard
+import com.bothbubbles.ui.settings.components.SettingsIconColors
 import com.bothbubbles.ui.settings.components.SettingsMenuItem
 import com.bothbubbles.ui.settings.components.SettingsSectionTitle
 import com.bothbubbles.ui.settings.components.SettingsSwitch
@@ -115,6 +137,12 @@ fun SettingsScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    // Search state
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    var isSearchVisible by rememberSaveable { mutableStateOf(false) }
+    val focusRequester = remember { FocusRequester() }
+    val listState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
+
     // MD3 LargeTopAppBar with scroll-to-collapse behavior
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
@@ -144,6 +172,12 @@ fun SettingsScreen(
                 .fillMaxSize()
                 .padding(padding),
             uiState = uiState,
+            searchQuery = searchQuery,
+            onSearchQueryChange = { searchQuery = it },
+            isSearchVisible = isSearchVisible,
+            onSearchVisibilityChange = { isSearchVisible = it },
+            focusRequester = focusRequester,
+            listState = listState,
             onServerSettingsClick = onServerSettingsClick,
             onArchivedClick = onArchivedClick,
             onBlockedClick = onBlockedClick,
@@ -185,6 +219,12 @@ fun SettingsScreen(
 fun SettingsContent(
     modifier: Modifier = Modifier,
     uiState: SettingsUiState,
+    searchQuery: String = "",
+    onSearchQueryChange: (String) -> Unit = {},
+    isSearchVisible: Boolean = false,
+    onSearchVisibilityChange: (Boolean) -> Unit = {},
+    focusRequester: FocusRequester = remember { FocusRequester() },
+    listState: LazyListState = rememberLazyListState(),
     onServerSettingsClick: () -> Unit,
     onArchivedClick: () -> Unit,
     onBlockedClick: () -> Unit,
@@ -214,6 +254,17 @@ fun SettingsContent(
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
 
+    // Track cumulative drag for pull-to-reveal
+    var cumulativeDrag by remember { mutableFloatStateOf(0f) }
+    val revealThreshold = 80f // dp threshold to reveal search
+
+    // Focus search field when it becomes visible
+    LaunchedEffect(isSearchVisible) {
+        if (isSearchVisible) {
+            focusRequester.requestFocus()
+        }
+    }
+
     // Helper to show snackbar with optional action
     fun showDisabledSnackbar(message: String, actionLabel: String? = null, onAction: (() -> Unit)? = null) {
         scope.launch {
@@ -228,15 +279,174 @@ fun SettingsContent(
         }
     }
 
+    // Searchable settings items - each has a title, keywords for matching, and section
+    data class SearchableItem(
+        val key: String,
+        val title: String,
+        val keywords: List<String>,
+        val section: String
+    )
+
+    val searchableItems = remember {
+        listOf(
+            // Connectivity
+            SearchableItem("imessage", "iMessage", listOf("bluebubbles", "server", "mac", "apple"), "Connectivity"),
+            SearchableItem("private_api", "Private API", listOf("typing", "reactions", "tapback", "read receipts", "advanced"), "Connectivity"),
+            SearchableItem("typing_indicators", "Send typing indicators", listOf("typing", "bubble"), "Connectivity"),
+            SearchableItem("sms", "SMS/MMS", listOf("text", "messaging", "cellular", "carrier"), "Connectivity"),
+            SearchableItem("sync", "Sync settings", listOf("refresh", "update", "data"), "Connectivity"),
+            // Notifications
+            SearchableItem("notifications", "Notifications", listOf("alert", "sound", "vibration", "badge"), "Notifications"),
+            SearchableItem("message_sounds", "Message sounds", listOf("audio", "tone", "ring"), "Notifications"),
+            SearchableItem("sound_theme", "Sound theme", listOf("tone", "ringtone"), "Notifications"),
+            // Appearance
+            SearchableItem("app_title", "Simple app title", listOf("name", "messages", "bothbubbles"), "Appearance"),
+            SearchableItem("unread_count", "Show unread count", listOf("badge", "number"), "Appearance"),
+            SearchableItem("effects", "Message effects", listOf("animation", "bubble", "screen", "confetti", "fireworks"), "Appearance"),
+            SearchableItem("swipe", "Swipe actions", listOf("gesture", "left", "right"), "Appearance"),
+            SearchableItem("haptics", "Haptic feedback", listOf("vibration", "vibrate", "touch"), "Appearance"),
+            SearchableItem("audio_haptic", "Sync haptics with sounds", listOf("vibration", "audio"), "Appearance"),
+            // Messaging
+            SearchableItem("templates", "Quick reply templates", listOf("saved", "responses", "canned"), "Messaging"),
+            SearchableItem("auto_responder", "Auto-responder", listOf("automatic", "reply", "greeting"), "Messaging"),
+            SearchableItem("media", "Media & content", listOf("link", "preview", "image", "video", "quality", "social"), "Messaging"),
+            // Sharing & Social
+            SearchableItem("eta", "ETA sharing", listOf("location", "navigation", "arrival", "maps"), "Sharing"),
+            SearchableItem("life360", "Life360", listOf("location", "family", "friends", "tracking"), "Sharing"),
+            SearchableItem("calendar", "Calendar integrations", listOf("events", "schedule", "busy"), "Sharing"),
+            // Privacy
+            SearchableItem("contacts", "Contacts access", listOf("permission", "phone", "address book"), "Privacy"),
+            SearchableItem("blocked", "Blocked contacts", listOf("block", "ignore"), "Privacy"),
+            SearchableItem("spam", "Spam protection", listOf("filter", "junk", "unwanted"), "Privacy"),
+            SearchableItem("categorization", "Message categorization", listOf("sort", "organize", "ml", "ai"), "Privacy"),
+            SearchableItem("archived", "Archived", listOf("hidden", "old"), "Privacy"),
+            // Data
+            SearchableItem("storage", "Storage", listOf("cache", "files", "space", "clear"), "Data"),
+            SearchableItem("export", "Export messages", listOf("backup", "save", "html", "pdf"), "Data"),
+            // About
+            SearchableItem("about", "About", listOf("version", "license", "help", "info"), "About")
+        )
+    }
+
+    // Filter items based on search query
+    val filteredItems = remember(searchQuery) {
+        if (searchQuery.isBlank()) {
+            emptySet()
+        } else {
+            val query = searchQuery.lowercase()
+            searchableItems.filter { item ->
+                item.title.lowercase().contains(query) ||
+                item.keywords.any { it.contains(query) }
+            }.map { it.key }.toSet()
+        }
+    }
+
+    val isFiltering = searchQuery.isNotBlank()
+
+    // Helper to check if any item in a section matches
+    fun sectionMatches(vararg keys: String): Boolean {
+        if (!isFiltering) return true
+        return keys.any { it in filteredItems }
+    }
+
+    // Check which sections should be visible
+    val showConnectivity = sectionMatches("imessage", "private_api", "typing_indicators", "sms", "sync")
+    val showNotifications = sectionMatches("notifications", "message_sounds", "sound_theme")
+    val showAppearance = sectionMatches("app_title", "unread_count", "effects", "swipe", "haptics", "audio_haptic")
+    val showMessaging = sectionMatches("templates", "auto_responder", "media")
+    val showSharing = sectionMatches("eta", "life360", "calendar")
+    val showPrivacy = sectionMatches("contacts", "blocked", "spam", "categorization", "archived")
+    val showData = sectionMatches("storage", "export")
+    val showAbout = sectionMatches("about")
+
     Box(modifier = modifier) {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp)
-        ) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Pull-to-reveal search bar
+            AnimatedVisibility(
+                visible = isSearchVisible,
+                enter = expandVertically(),
+                exit = shrinkVertically()
+            ) {
+                PullToRevealSearchBar(
+                    query = searchQuery,
+                    onQueryChange = onSearchQueryChange,
+                    onClose = {
+                        onSearchQueryChange("")
+                        onSearchVisibilityChange(false)
+                    },
+                    focusRequester = focusRequester,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            // Pull indicator when at top and not searching
+            if (!isSearchVisible) {
+                val indicatorAlpha by animateFloatAsState(
+                    targetValue = if (cumulativeDrag > 20f) (cumulativeDrag / revealThreshold).coerceIn(0f, 1f) else 0f,
+                    label = "indicatorAlpha"
+                )
+                if (indicatorAlpha > 0f) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .alpha(indicatorAlpha)
+                            .padding(vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Search,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "Pull to search",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(isSearchVisible) {
+                        if (!isSearchVisible) {
+                            detectVerticalDragGestures(
+                                onDragStart = { cumulativeDrag = 0f },
+                                onDragEnd = {
+                                    if (cumulativeDrag >= revealThreshold && listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0) {
+                                        onSearchVisibilityChange(true)
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    }
+                                    cumulativeDrag = 0f
+                                },
+                                onDragCancel = { cumulativeDrag = 0f },
+                                onVerticalDrag = { _, dragAmount ->
+                                    // Only track downward drags when at the top
+                                    if (dragAmount > 0 && listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0) {
+                                        cumulativeDrag += dragAmount
+                                    } else if (dragAmount < 0) {
+                                        cumulativeDrag = (cumulativeDrag + dragAmount).coerceAtLeast(0f)
+                                    }
+                                }
+                            )
+                        }
+                    },
+                contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp)
+            ) {
         // ═══════════════════════════════════════════════════════════════
         // SECTION 1: Connectivity
         // Focus: The "pipes" that make the app work
         // ═══════════════════════════════════════════════════════════════
+        if (showConnectivity) {
         item {
             val iMessageStatus = when (uiState.connectionState) {
                 ConnectionState.CONNECTED -> BadgeStatus.CONNECTED
@@ -306,6 +516,7 @@ fun SettingsContent(
                 SettingsMenuItem(
                     icon = Icons.Default.Cloud,
                     title = "iMessage",
+                    iconTint = SettingsIconColors.Connectivity,
                     subtitle = "BlueBubbles server settings",
                     onClick = onServerSettingsClick
                 )
@@ -316,6 +527,7 @@ fun SettingsContent(
                 SettingsMenuItem(
                     icon = Icons.Default.VpnKey,
                     title = "Enable Private API",
+                    iconTint = SettingsIconColors.Connectivity,
                     subtitle = when {
                         !uiState.isServerConfigured -> "Configure server to enable"
                         isConnecting -> "Connecting to server..."
@@ -362,6 +574,7 @@ fun SettingsContent(
                 SettingsMenuItem(
                     icon = Icons.Default.Keyboard,
                     title = "Send typing indicators",
+                    iconTint = SettingsIconColors.Connectivity,
                     subtitle = when {
                         !uiState.isServerConfigured -> "Configure server to enable"
                         !uiState.enablePrivateApi -> "Enable Private API first"
@@ -405,6 +618,7 @@ fun SettingsContent(
                 SettingsMenuItem(
                     icon = Icons.Default.CellTower,
                     title = stringResource(R.string.settings_sms),
+                    iconTint = SettingsIconColors.Connectivity,
                     subtitle = "Local SMS messaging options",
                     onClick = onSmsSettingsClick
                 )
@@ -415,16 +629,19 @@ fun SettingsContent(
                 SettingsMenuItem(
                     icon = Icons.Default.Sync,
                     title = "Sync settings",
+                    iconTint = SettingsIconColors.Connectivity,
                     subtitle = "Last synced: ${uiState.lastSyncFormatted}",
                     onClick = onSyncSettingsClick
                 )
             }
+        }
         }
 
         // ═══════════════════════════════════════════════════════════════
         // SECTION 3: Notifications & Alerts
         // Focus: How the app gets your attention
         // ═══════════════════════════════════════════════════════════════
+        if (showNotifications) {
         item {
             SettingsSectionTitle(title = "Notifications & alerts")
         }
@@ -437,6 +654,7 @@ fun SettingsContent(
                 SettingsMenuItem(
                     icon = Icons.Default.Notifications,
                     title = stringResource(R.string.settings_notifications),
+                    iconTint = SettingsIconColors.Notifications,
                     subtitle = "Sound, vibration, and display",
                     onClick = onNotificationsClick
                 )
@@ -447,6 +665,7 @@ fun SettingsContent(
                 SettingsMenuItem(
                     icon = Icons.Default.VolumeUp,
                     title = "Message sounds",
+                    iconTint = SettingsIconColors.Notifications,
                     subtitle = "Play sounds when sending and receiving messages",
                     onClick = { viewModel.setMessageSoundsEnabled(!uiState.messageSoundsEnabled) },
                     trailingContent = {
@@ -467,6 +686,7 @@ fun SettingsContent(
                     SettingsMenuItem(
                         icon = Icons.Default.MusicNote,
                         title = "Sound theme",
+                        iconTint = SettingsIconColors.Notifications,
                         subtitle = uiState.soundTheme.displayName,
                         onClick = { showSoundPicker = true }
                     )
@@ -484,11 +704,13 @@ fun SettingsContent(
                 }
             }
         }
+        }
 
         // ═══════════════════════════════════════════════════════════════
         // SECTION 4: Appearance & Interaction
         // Focus: Visual customization and tactile feedback
         // ═══════════════════════════════════════════════════════════════
+        if (showAppearance) {
         item {
             SettingsSectionTitle(title = "Appearance & interaction")
         }
@@ -497,64 +719,33 @@ fun SettingsContent(
             SettingsCard(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
             ) {
-                // Simple app title toggle
-                SettingsMenuItem(
-                    icon = Icons.Default.TextFields,
-                    title = "Simple app title",
-                    subtitle = if (uiState.useSimpleAppTitle) "Showing \"Messages\"" else "Showing \"BothBubbles\"",
-                    onClick = { viewModel.setUseSimpleAppTitle(!uiState.useSimpleAppTitle) },
-                    trailingContent = {
-                        SettingsSwitch(
-                            checked = uiState.useSimpleAppTitle,
-                            onCheckedChange = { viewModel.setUseSimpleAppTitle(it) },
-                            showIcons = false
-                        )
-                    }
-                )
-
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                // Show unread count in header toggle
-                SettingsMenuItem(
-                    icon = Icons.Default.MarkUnreadChatAlt,
-                    title = "Show unread count",
-                    subtitle = if (uiState.showUnreadCountInHeader) "Badge visible in header" else "Badge hidden",
-                    onClick = { viewModel.setShowUnreadCountInHeader(!uiState.showUnreadCountInHeader) },
-                    trailingContent = {
-                        SettingsSwitch(
-                            checked = uiState.showUnreadCountInHeader,
-                            onCheckedChange = { viewModel.setShowUnreadCountInHeader(it) },
-                            showIcons = false
-                        )
-                    }
-                )
-
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                // Message effects
+                // Message effects - most visually impactful, first
                 SettingsMenuItem(
                     icon = Icons.Default.AutoAwesome,
                     title = "Message effects",
+                    iconTint = SettingsIconColors.Appearance,
                     subtitle = "Animations for screen and bubble effects",
                     onClick = onEffectsSettingsClick
                 )
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-                // Swipe gestures
+                // Swipe gestures - frequently used
                 SettingsMenuItem(
                     icon = Icons.Default.SwipeRight,
                     title = "Swipe actions",
+                    iconTint = SettingsIconColors.Appearance,
                     subtitle = "Customize conversation swipe gestures",
                     onClick = onSwipeSettingsClick
                 )
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-                // Haptic feedback toggle
+                // Haptic feedback toggle - commonly adjusted
                 SettingsMenuItem(
                     icon = Icons.Default.Vibration,
                     title = "Haptic feedback",
+                    iconTint = SettingsIconColors.Appearance,
                     subtitle = if (uiState.hapticsEnabled) "Vibration feedback enabled" else "Vibration feedback disabled",
                     onClick = {
                         val enablingHaptics = !uiState.hapticsEnabled
@@ -584,6 +775,7 @@ fun SettingsContent(
                     SettingsMenuItem(
                         icon = Icons.Default.GraphicEq,
                         title = "Sync haptics with sounds",
+                        iconTint = SettingsIconColors.Appearance,
                         subtitle = "Play haptic patterns matched to sound effects",
                         onClick = { viewModel.setAudioHapticSyncEnabled(!uiState.audioHapticSyncEnabled) },
                         trailingContent = {
@@ -595,13 +787,51 @@ fun SettingsContent(
                         }
                     )
                 }
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                // Show unread count in header toggle
+                SettingsMenuItem(
+                    icon = Icons.Default.MarkUnreadChatAlt,
+                    title = "Show unread count",
+                    iconTint = SettingsIconColors.Appearance,
+                    subtitle = if (uiState.showUnreadCountInHeader) "Badge visible in header" else "Badge hidden",
+                    onClick = { viewModel.setShowUnreadCountInHeader(!uiState.showUnreadCountInHeader) },
+                    trailingContent = {
+                        SettingsSwitch(
+                            checked = uiState.showUnreadCountInHeader,
+                            onCheckedChange = { viewModel.setShowUnreadCountInHeader(it) },
+                            showIcons = false
+                        )
+                    }
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                // Simple app title toggle - niche setting, last
+                SettingsMenuItem(
+                    icon = Icons.Default.TextFields,
+                    title = "Simple app title",
+                    iconTint = SettingsIconColors.Appearance,
+                    subtitle = if (uiState.useSimpleAppTitle) "Showing \"Messages\"" else "Showing \"BothBubbles\"",
+                    onClick = { viewModel.setUseSimpleAppTitle(!uiState.useSimpleAppTitle) },
+                    trailingContent = {
+                        SettingsSwitch(
+                            checked = uiState.useSimpleAppTitle,
+                            onCheckedChange = { viewModel.setUseSimpleAppTitle(it) },
+                            showIcons = false
+                        )
+                    }
+                )
             }
+        }
         }
 
         // ═══════════════════════════════════════════════════════════════
         // SECTION 5: Messaging
         // Focus: Composing and sending enhancements
         // ═══════════════════════════════════════════════════════════════
+        if (showMessaging) {
         item {
             SettingsSectionTitle(title = "Messaging")
         }
@@ -610,40 +840,45 @@ fun SettingsContent(
             SettingsCard(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
             ) {
+                // Media & content - most commonly used, first
+                SettingsMenuItem(
+                    icon = Icons.Default.PermMedia,
+                    title = "Media & content",
+                    iconTint = SettingsIconColors.Messaging,
+                    subtitle = "Link previews, social media videos, image quality",
+                    onClick = onMediaContentClick
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
                 // Quick reply templates
                 SettingsMenuItem(
                     icon = Icons.Default.Quickreply,
                     title = "Quick reply templates",
+                    iconTint = SettingsIconColors.Messaging,
                     subtitle = "Saved responses and smart suggestions",
                     onClick = onTemplatesClick
                 )
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-                // Auto-responder
+                // Auto-responder - least common, last
                 SettingsMenuItem(
                     icon = Icons.Default.SmartToy,
                     title = "Auto-responder",
+                    iconTint = SettingsIconColors.Messaging,
                     subtitle = "Greet first-time iMessage contacts",
                     onClick = onAutoResponderClick
                 )
-
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                // Media & content (new combined page)
-                SettingsMenuItem(
-                    icon = Icons.Default.PermMedia,
-                    title = "Media & content",
-                    subtitle = "Link previews, social media videos, image quality",
-                    onClick = onMediaContentClick
-                )
             }
+        }
         }
 
         // ═══════════════════════════════════════════════════════════════
         // SECTION 5.5: Sharing & Social
         // Focus: Location sharing and social integrations
         // ═══════════════════════════════════════════════════════════════
+        if (showSharing) {
         item {
             SettingsSectionTitle(title = "Sharing & Social")
         }
@@ -656,6 +891,7 @@ fun SettingsContent(
                 SettingsMenuItem(
                     icon = Icons.Outlined.Navigation,
                     title = "ETA sharing",
+                    iconTint = SettingsIconColors.Location,
                     subtitle = "Share arrival time while navigating",
                     onClick = onEtaSharingClick
                 )
@@ -666,6 +902,7 @@ fun SettingsContent(
                 SettingsMenuItem(
                     icon = Icons.Outlined.LocationOn,
                     title = "Life360",
+                    iconTint = SettingsIconColors.Location,
                     subtitle = "Show friends and family locations",
                     onClick = onLife360Click
                 )
@@ -676,16 +913,19 @@ fun SettingsContent(
                 SettingsMenuItem(
                     icon = Icons.Default.CalendarMonth,
                     title = "Calendar integrations",
+                    iconTint = SettingsIconColors.Location,
                     subtitle = "Show contact calendars in chat headers",
                     onClick = onCalendarClick
                 )
             }
+        }
         }
 
         // ═══════════════════════════════════════════════════════════════
         // SECTION 6: Privacy & Permissions
         // Focus: Managing the inbox, security, and app permissions
         // ═══════════════════════════════════════════════════════════════
+        if (showPrivacy) {
         item {
             SettingsSectionTitle(title = "Privacy & permissions")
         }
@@ -694,10 +934,52 @@ fun SettingsContent(
             SettingsCard(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
             ) {
-                // Contacts access
+                // Spam protection - security first
+                SettingsMenuItem(
+                    icon = Icons.Default.Shield,
+                    title = "Spam protection",
+                    iconTint = SettingsIconColors.Privacy,
+                    subtitle = "Automatic spam detection settings",
+                    onClick = onSpamClick
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                // Blocked contacts - managing who can contact you
+                SettingsMenuItem(
+                    icon = Icons.Default.Block,
+                    title = "Blocked contacts",
+                    iconTint = SettingsIconColors.Privacy,
+                    subtitle = if (!uiState.isDefaultSmsApp) "Requires default SMS app" else null,
+                    onClick = onBlockedClick,
+                    enabled = uiState.isDefaultSmsApp,
+                    onDisabledClick = {
+                        showDisabledSnackbar(
+                            message = "Set as default SMS app to manage blocked contacts",
+                            actionLabel = "SMS Settings",
+                            onAction = onSmsSettingsClick
+                        )
+                    }
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                // Message categorization - organizing messages
+                SettingsMenuItem(
+                    icon = Icons.Default.Category,
+                    title = "Message categorization",
+                    iconTint = SettingsIconColors.Privacy,
+                    subtitle = "Sort messages into categories with ML",
+                    onClick = onCategorizationClick
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                // Contacts access - permission management
                 SettingsMenuItem(
                     icon = Icons.Default.Contacts,
                     title = "Contacts access",
+                    iconTint = SettingsIconColors.Privacy,
                     subtitle = if (uiState.hasContactsPermission) {
                         "Tap to refresh contact names and photos"
                     } else {
@@ -730,48 +1012,11 @@ fun SettingsContent(
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-                // Blocked contacts
-                SettingsMenuItem(
-                    icon = Icons.Default.Block,
-                    title = "Blocked contacts",
-                    subtitle = if (!uiState.isDefaultSmsApp) "Requires default SMS app" else null,
-                    onClick = onBlockedClick,
-                    enabled = uiState.isDefaultSmsApp,
-                    onDisabledClick = {
-                        showDisabledSnackbar(
-                            message = "Set as default SMS app to manage blocked contacts",
-                            actionLabel = "SMS Settings",
-                            onAction = onSmsSettingsClick
-                        )
-                    }
-                )
-
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                // Spam protection
-                SettingsMenuItem(
-                    icon = Icons.Default.Shield,
-                    title = "Spam protection",
-                    subtitle = "Automatic spam detection settings",
-                    onClick = onSpamClick
-                )
-
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                // Message categorization
-                SettingsMenuItem(
-                    icon = Icons.Default.Category,
-                    title = "Message categorization",
-                    subtitle = "Sort messages into categories with ML",
-                    onClick = onCategorizationClick
-                )
-
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                // Archived
+                // Archived - viewing hidden chats, least important
                 SettingsMenuItem(
                     icon = Icons.Outlined.Archive,
                     title = "Archived",
+                    iconTint = SettingsIconColors.Privacy,
                     onClick = onArchivedClick,
                     trailingContent = if (uiState.archivedCount > 0) {
                         {
@@ -785,11 +1030,13 @@ fun SettingsContent(
                 )
             }
         }
+        }
 
         // ═══════════════════════════════════════════════════════════════
         // SECTION 7: Data & Backup
         // Focus: Long-term data management
         // ═══════════════════════════════════════════════════════════════
+        if (showData) {
         item {
             SettingsSectionTitle(title = "Data & backup")
         }
@@ -802,6 +1049,7 @@ fun SettingsContent(
                 SettingsMenuItem(
                     icon = Icons.Default.Storage,
                     title = "Storage",
+                    iconTint = SettingsIconColors.Data,
                     subtitle = "Manage cached files and app storage",
                     onClick = onStorageClick
                 )
@@ -812,16 +1060,19 @@ fun SettingsContent(
                 SettingsMenuItem(
                     icon = Icons.Default.Download,
                     title = "Export messages",
+                    iconTint = SettingsIconColors.Data,
                     subtitle = "Save conversations as HTML or PDF",
                     onClick = onExportClick
                 )
             }
+        }
         }
 
         // ═══════════════════════════════════════════════════════════════
         // SECTION 8: About
         // Focus: App information (always at bottom)
         // ═══════════════════════════════════════════════════════════════
+        if (showAbout) {
         item {
             Spacer(modifier = Modifier.height(8.dp))
         }
@@ -833,6 +1084,7 @@ fun SettingsContent(
                 SettingsMenuItem(
                     icon = Icons.Default.Info,
                     title = stringResource(R.string.settings_about),
+                    iconTint = SettingsIconColors.About,
                     subtitle = "Version, licenses, and help",
                     onClick = onAboutClick
                 )
@@ -840,11 +1092,140 @@ fun SettingsContent(
         }
         }
 
+        // Show "no results" message when filtering returns nothing
+        if (isFiltering && filteredItems.isEmpty()) {
+            item {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 48.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.SearchOff,
+                            contentDescription = null,
+                            modifier = Modifier.size(48.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                        )
+                        Text(
+                            text = "No settings found",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = "Try a different search term",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        )
+                    }
+                }
+            }
+        }
+            }
+        }
+
         // Snackbar host for disabled click feedback
         SnackbarHost(
             hostState = snackbarHostState,
             modifier = Modifier.align(Alignment.BottomCenter)
         )
+    }
+}
+
+/**
+ * Pull-to-reveal search bar for Settings screen.
+ * Shows a search field with close button when revealed.
+ */
+@Composable
+private fun PullToRevealSearchBar(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    onClose: () -> Unit,
+    focusRequester: FocusRequester,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        tonalElevation = 2.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Search field container
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Box(modifier = Modifier.weight(1f)) {
+                        if (query.isEmpty()) {
+                            Text(
+                                text = "Search settings",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        BasicTextField(
+                            value = query,
+                            onValueChange = onQueryChange,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .focusRequester(focusRequester),
+                            textStyle = MaterialTheme.typography.bodyLarge.copy(
+                                color = MaterialTheme.colorScheme.onSurface
+                            ),
+                            singleLine = true,
+                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary)
+                        )
+                    }
+                    if (query.isNotEmpty()) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        IconButton(
+                            onClick = { onQueryChange("") },
+                            modifier = Modifier.size(20.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Clear,
+                                contentDescription = "Clear",
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            // Close button
+            IconButton(onClick = onClose) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Close search",
+                    tint = MaterialTheme.colorScheme.onSurface
+                )
+            }
+        }
     }
 }
 
@@ -1231,6 +1612,7 @@ fun SocialMediaSettingsContent(
                 SettingsMenuItem(
                     icon = Icons.Default.PlayCircle,
                     title = "TikTok video playback",
+                    iconTint = SettingsIconColors.Messaging,
                     subtitle = if (uiState.tiktokDownloaderEnabled) {
                         "Play TikTok videos inline"
                     } else {
@@ -1252,6 +1634,7 @@ fun SocialMediaSettingsContent(
                 SettingsMenuItem(
                     icon = Icons.Default.PlayCircle,
                     title = "Instagram video playback",
+                    iconTint = SettingsIconColors.Messaging,
                     subtitle = if (uiState.instagramDownloaderEnabled) {
                         "Play Instagram Reels inline"
                     } else {
@@ -1284,6 +1667,7 @@ fun SocialMediaSettingsContent(
                 SettingsMenuItem(
                     icon = Icons.Default.CloudDownload,
                     title = "Auto-download videos",
+                    iconTint = SettingsIconColors.Messaging,
                     subtitle = if (!downloadSectionEnabled) {
                         "Enable TikTok or Instagram first"
                     } else if (uiState.socialMediaBackgroundDownloadEnabled) {
@@ -1315,6 +1699,7 @@ fun SocialMediaSettingsContent(
                 SettingsMenuItem(
                     icon = Icons.Default.SignalCellularAlt,
                     title = "Download on cellular",
+                    iconTint = SettingsIconColors.Messaging,
                     subtitle = if (!downloadSectionEnabled) {
                         "Enable TikTok or Instagram first"
                     } else if (uiState.socialMediaDownloadOnCellularEnabled) {
@@ -1346,6 +1731,7 @@ fun SocialMediaSettingsContent(
                 SettingsMenuItem(
                     icon = Icons.Default.Hd,
                     title = "TikTok video quality",
+                    iconTint = SettingsIconColors.Messaging,
                     subtitle = if (!tiktokQualityEnabled) {
                         "Enable TikTok first"
                     } else if (uiState.tiktokVideoQuality == "hd") {
@@ -1390,6 +1776,7 @@ fun SocialMediaSettingsContent(
                 SettingsMenuItem(
                     icon = Icons.Default.Slideshow,
                     title = "Reels experience",
+                    iconTint = SettingsIconColors.Messaging,
                     subtitle = if (!reelsSectionEnabled) {
                         "Enable auto-download first"
                     } else if (uiState.reelsFeedEnabled) {
@@ -1420,6 +1807,7 @@ fun SocialMediaSettingsContent(
                 SettingsMenuItem(
                     icon = Icons.Default.AttachFile,
                     title = "Include video attachments",
+                    iconTint = SettingsIconColors.Messaging,
                     subtitle = if (uiState.reelsIncludeVideoAttachments) {
                         "All videos in chat appear in Reels"
                     } else {

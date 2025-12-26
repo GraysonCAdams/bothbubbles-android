@@ -68,8 +68,7 @@ fun DeveloperConnectionOverlay(
                     )
                     Text(
                         text = getLabel(connectionMode),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
+                        style = MaterialTheme.typography.labelSmall,
                         color = getContentColor(connectionMode)
                     )
                 }

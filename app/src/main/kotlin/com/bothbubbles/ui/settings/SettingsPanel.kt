@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -73,6 +74,8 @@ import com.bothbubbles.ui.settings.templates.QuickReplyTemplatesContent
 import com.bothbubbles.ui.settings.eta.EtaSharingSettingsContent
 import com.bothbubbles.ui.settings.media.MediaContentScreen
 import com.bothbubbles.ui.settings.calendar.CalendarSettingsContent
+import com.bothbubbles.ui.settings.life360.Life360DisclaimerDialog
+import com.bothbubbles.ui.settings.life360.Life360SettingsContent
 import com.bothbubbles.ui.settings.search.SettingsSearchResults
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.filled.Search
@@ -99,6 +102,10 @@ fun SettingsPanel(
     // Sync settings dialog state
     var showCleanSyncDialog by remember { mutableStateOf(false) }
     var showDisconnectDialog by remember { mutableStateOf(false) }
+
+    // Life360 webview state for showing warning icon
+    var isLife360WebViewShowing by remember { mutableStateOf(false) }
+    var showLife360Disclaimer by remember { mutableStateOf(false) }
 
     // Handle system back button
     BackHandler(enabled = true) {
@@ -203,6 +210,16 @@ fun SettingsPanel(
                                 Icon(
                                     Icons.Default.Close,
                                     contentDescription = "Clear search"
+                                )
+                            }
+                        }
+                        // Life360 warning icon when webview is showing
+                        if (navigator.currentPage == SettingsPanelPage.Life360 && isLife360WebViewShowing) {
+                            IconButton(onClick = { showLife360Disclaimer = true }) {
+                                Icon(
+                                    Icons.Default.WarningAmber,
+                                    contentDescription = "View disclaimer",
+                                    tint = MaterialTheme.colorScheme.error
                                 )
                             }
                         }
@@ -395,7 +412,9 @@ fun SettingsPanel(
                         EtaSharingSettingsContent()
                     }
                     SettingsPanelPage.Life360 -> {
-                        com.bothbubbles.ui.settings.life360.Life360SettingsContent()
+                        Life360SettingsContent(
+                            onShowingWebView = { isLife360WebViewShowing = it }
+                        )
                     }
                     SettingsPanelPage.SocialMedia -> {
                         SocialMediaSettingsContent()
@@ -486,6 +505,16 @@ fun SettingsPanel(
                     Text("Cancel")
                 }
             }
+        )
+    }
+
+    // Life360 disclaimer dialog
+    if (showLife360Disclaimer) {
+        Life360DisclaimerDialog(
+            isConnected = false,
+            onProceed = { showLife360Disclaimer = false },
+            onUnlink = { /* Not applicable for non-connected state */ },
+            onDismiss = { showLife360Disclaimer = false }
         )
     }
 }

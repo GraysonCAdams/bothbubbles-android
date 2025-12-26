@@ -343,8 +343,10 @@ class NotificationBuilder @Inject constructor(
             }
         }
 
-        // Ensure group conversation title is never empty (Android Auto compatibility)
-        val safeConversationTitle = if (isGroup && chatTitle.isNotBlank()) chatTitle else null
+        // Set conversation title for ALL conversations (not just groups)
+        // This ensures Android shows the contact/group name in notification grouping
+        // instead of falling back to "BothBubbles" app name
+        val safeConversationTitle = chatTitle.takeIf { it.isNotBlank() }
         val messagingStyle = NotificationCompat.MessagingStyle(deviceUser)
             .setConversationTitle(safeConversationTitle)
             .setGroupConversation(isGroup)

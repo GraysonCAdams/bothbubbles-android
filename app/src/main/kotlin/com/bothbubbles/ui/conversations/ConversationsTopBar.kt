@@ -123,9 +123,7 @@ internal fun ConversationsTopBar(
                     Text(
                         text = if (totalUnreadCount > 10000) "9999+" else totalUnreadCount.toString(),
                         style = MaterialTheme.typography.labelSmall.copy(
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            lineHeight = 14.sp
+                            fontWeight = FontWeight.Bold
                         ),
                         color = MaterialTheme.colorScheme.onPrimary
                     )

@@ -179,7 +179,7 @@ internal fun GoogleStyleConversationTile(
                                     name = conversation.displayName,
                                     avatarPath = conversation.chatAvatarPath,
                                     size = 56.dp,
-                                    hasContactInfo = !conversation.hasInferredName
+                                    hasContactInfo = conversation.hasContact
                                 )
                             } else if (conversation.isGroup) {
                                 GroupAvatar(
@@ -192,7 +192,7 @@ internal fun GoogleStyleConversationTile(
                                     name = conversation.rawDisplayName,
                                     avatarPath = conversation.avatarPath,
                                     size = 56.dp,
-                                    hasContactInfo = !conversation.hasInferredName
+                                    hasContactInfo = conversation.hasContact
                                 )
                             }
 
@@ -457,8 +457,7 @@ internal fun UnreadBadge(
             Text(
                 text = if (count > 99) "99+" else count.toString(),
                 style = MaterialTheme.typography.labelSmall.copy(
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 11.sp
+                    fontWeight = FontWeight.Bold
                 ),
                 color = MaterialTheme.colorScheme.inverseOnSurface
             )

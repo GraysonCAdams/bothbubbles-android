@@ -1,6 +1,7 @@
 package com.bothbubbles.data.repository
 
 import com.bothbubbles.data.local.db.dao.ChatDao
+import com.bothbubbles.data.local.db.dao.SocialMediaLinkDao
 import com.bothbubbles.data.local.db.dao.TombstoneDao
 import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import timber.log.Timber
@@ -9,6 +10,8 @@ import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.MessageSource
 import com.bothbubbles.data.local.db.entity.ReactionClassifier
 import com.bothbubbles.data.local.db.entity.SyncSource
+import com.bothbubbles.core.model.entity.SocialMediaLinkEntity
+import com.bothbubbles.core.model.entity.SocialMediaPlatform
 import com.bothbubbles.core.network.api.BothBubblesApi
 import com.bothbubbles.core.network.api.dto.MessageDto
 import com.bothbubbles.core.network.api.dto.MessageQueryRequest
@@ -18,6 +21,7 @@ import com.bothbubbles.util.parsing.HtmlEntityDecoder
 import com.bothbubbles.util.retryWithBackoff
 import com.bothbubbles.util.retryWithRateLimitAwareness
 import kotlinx.coroutines.flow.Flow
+import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -37,11 +41,24 @@ class MessageRepository @Inject constructor(
     private val chatDao: ChatDao,
     private val unifiedChatDao: UnifiedChatDao,
     private val tombstoneDao: TombstoneDao,
+    private val socialMediaLinkDao: SocialMediaLinkDao,
     private val api: BothBubblesApi,
     private val syncRangeTracker: SyncRangeTracker,
     private val attachmentRepository: AttachmentRepository,
     private val chatSyncOperations: ChatSyncOperations
 ) {
+
+    companion object {
+        // Instagram URL patterns - matches IncomingMessageHandler
+        private val INSTAGRAM_PATTERN = Regex(
+            """https?://(?:www\.)?instagram\.com/(?:reel|reels|p|share/reel|share/p)/[A-Za-z0-9_-]+[^\s]*"""
+        )
+
+        // TikTok URL patterns - matches IncomingMessageHandler
+        private val TIKTOK_PATTERN = Regex(
+            """https?://(?:www\.|vm\.|vt\.)?tiktok\.com/[^\s]+"""
+        )
+    }
 
     // ===== Local Query Operations =====
 
@@ -378,6 +395,10 @@ class MessageRepository @Inject constructor(
             body.data.orEmpty().forEach { messageDto ->
                 attachmentRepository.syncAttachmentsFromDto(messageDto)
             }
+
+            // Store social media links for Reels feed
+            // This ensures links from synced messages are tracked, not just real-time pushes
+            storeSocialMediaLinks(messages, chatGuid, body.data.orEmpty())
 
             // Record the synced range for sparse pagination tracking
             if (messages.isNotEmpty()) {
@@ -720,5 +741,89 @@ class MessageRepository @Inject constructor(
             // Compute is_reaction using centralized logic for efficient SQL queries
             isReactionDb = ReactionClassifier.isReaction(associatedMessageGuid, associatedMessageType)
         )
+    }
+
+    // ===== Social Media Link Storage =====
+
+    /**
+     * Detects and stores social media links from synced messages.
+     * This mirrors the logic in IncomingMessageHandler.storeSocialMediaLinks()
+     * but operates on already-synced MessageEntity objects.
+     *
+     * Only processes non-reaction messages to ensure correct sender attribution.
+     */
+    private suspend fun storeSocialMediaLinks(
+        messages: List<MessageEntity>,
+        chatGuid: String,
+        messageDtos: List<MessageDto>
+    ) {
+        val links = mutableListOf<SocialMediaLinkEntity>()
+        val dtoMap = messageDtos.associateBy { it.guid }
+
+        for (message in messages) {
+            val text = message.text ?: continue
+
+            // Skip reactions - they quote URLs but aren't the original sender
+            if (message.associatedMessageType != null) continue
+
+            val dto = dtoMap[message.guid]
+            val senderAddress = if (message.isFromMe) null else dto?.handle?.address
+
+            // Find Instagram URLs
+            for (match in INSTAGRAM_PATTERN.findAll(text)) {
+                val url = match.value
+                links.add(
+                    SocialMediaLinkEntity(
+                        urlHash = hashUrl(url),
+                        url = url,
+                        messageGuid = message.guid,
+                        chatGuid = chatGuid,
+                        platform = SocialMediaPlatform.INSTAGRAM.name,
+                        senderAddress = senderAddress,
+                        isFromMe = message.isFromMe,
+                        sentTimestamp = message.dateCreated,
+                        isDownloaded = false,
+                        createdAt = System.currentTimeMillis()
+                    )
+                )
+            }
+
+            // Find TikTok URLs
+            for (match in TIKTOK_PATTERN.findAll(text)) {
+                val url = match.value
+                links.add(
+                    SocialMediaLinkEntity(
+                        urlHash = hashUrl(url),
+                        url = url,
+                        messageGuid = message.guid,
+                        chatGuid = chatGuid,
+                        platform = SocialMediaPlatform.TIKTOK.name,
+                        senderAddress = senderAddress,
+                        isFromMe = message.isFromMe,
+                        sentTimestamp = message.dateCreated,
+                        isDownloaded = false,
+                        createdAt = System.currentTimeMillis()
+                    )
+                )
+            }
+        }
+
+        if (links.isNotEmpty()) {
+            try {
+                socialMediaLinkDao.insertAll(links)
+                Timber.d("[SocialMedia] Sync stored ${links.size} social media link(s)")
+            } catch (e: Exception) {
+                Timber.w(e, "[SocialMedia] Failed to store social media links during sync")
+            }
+        }
+    }
+
+    /**
+     * Hash URL for deduplication (matches IncomingMessageHandler.hashUrl).
+     */
+    private fun hashUrl(url: String): String {
+        val md = MessageDigest.getInstance("SHA-256")
+        val digest = md.digest(url.toByteArray())
+        return digest.joinToString("") { "%02x".format(it) }.take(32)
     }
 }

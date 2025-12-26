@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.bothbubbles.core.design.theme.AppTextStyles
 import com.bothbubbles.R
 import com.bothbubbles.ui.chat.ChatSendMode
 import com.bothbubbles.ui.chat.SendButtonAnimationPhase
@@ -468,9 +469,8 @@ fun SendModeToggleButton(
                                 )
                                 Text(
                                     text = "MMS",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = contentColor,
-                                    fontSize = 7.sp
+                                    style = AppTextStyles.badgeTiny,
+                                    color = contentColor
                                 )
                             }
                         } else if (mode == ChatSendMode.SMS) {
@@ -493,9 +493,8 @@ fun SendModeToggleButton(
                                 ) {
                                     Text(
                                         text = "S",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = smsColor,
-                                        fontSize = 5.sp
+                                        style = AppTextStyles.badgeMinimal,
+                                        color = smsColor
                                     )
                                 }
                             }

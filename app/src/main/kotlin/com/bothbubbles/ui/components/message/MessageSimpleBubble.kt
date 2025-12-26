@@ -84,6 +84,7 @@ import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.bothbubbles.core.design.theme.AppTextStyles
 import com.bothbubbles.data.local.db.entity.MessageSource
 import com.bothbubbles.ui.components.common.buildAnnotatedStringWithClickables
 import com.bothbubbles.ui.components.common.buildSearchHighlightedText
@@ -636,7 +637,7 @@ internal fun SimpleBubbleContent(
                                 else -> bubbleColors.receivedText
                             }
                             val textStyle = if (isLargeEmoji) {
-                                MaterialTheme.typography.bodyLarge.copy(fontSize = 48.sp)
+                                AppTextStyles.emojiLarge
                             } else {
                                 MaterialTheme.typography.bodyLarge
                             }

@@ -27,6 +27,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.bothbubbles.core.design.theme.AppTextStyles
 import com.bothbubbles.ui.theme.BothBubblesTheme
 
 /**
@@ -155,7 +156,7 @@ private fun ReactionBadge(
         ) {
             Text(
                 text = tapback.emoji,
-                fontSize = 14.sp
+                style = AppTextStyles.emojiSmall
             )
             if (count > 1) {
                 Text(
@@ -204,7 +205,7 @@ private fun ReactionDetailsSheet(
         ) {
             Text(
                 text = tapback.emoji,
-                fontSize = 28.sp
+                style = AppTextStyles.emojiMedium
             )
             Spacer(modifier = Modifier.width(16.dp))
             Text(

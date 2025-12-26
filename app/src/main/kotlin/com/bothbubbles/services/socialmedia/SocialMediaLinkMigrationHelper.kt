@@ -39,9 +39,9 @@ class SocialMediaLinkMigrationHelper @Inject constructor(
 ) {
     companion object {
         private const val PREFS_NAME = "social_media_link_migration"
-        // Bumped to v2 to re-run migration for users who hit the timing bug
-        // where migration marked complete before initial sync finished
-        private const val KEY_MIGRATION_COMPLETED = "migration_completed_v2"
+        // Bumped to v3 to re-run migration after fixing bug where sync/polling
+        // path didn't populate social_media_links table
+        private const val KEY_MIGRATION_COMPLETED = "migration_completed_v3"
         private const val KEY_METADATA_REPAIR_COMPLETED = "metadata_repair_completed_v1"
         private const val KEY_OUTGOING_MIGRATION_COMPLETED = "outgoing_migration_completed_v1"
         private const val KEY_POST_CLEANUP_COMPLETED = "post_cleanup_completed_v1"

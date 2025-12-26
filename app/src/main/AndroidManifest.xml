@@ -73,6 +73,8 @@
         <package android:name="com.life360.android.safetymapd" />
         <!-- WhatsApp for video calls -->
         <package android:name="com.whatsapp" />
+        <!-- Google Tasks for message reminders -->
+        <package android:name="com.google.android.apps.tasks" />
         <!-- Google Maps for navigation -->
         <intent>
             <action android:name="android.intent.action.VIEW" />

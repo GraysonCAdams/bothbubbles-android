@@ -40,6 +40,7 @@ import com.bothbubbles.util.HapticUtils
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.bothbubbles.core.design.theme.AppTextStyles
 import com.bothbubbles.R
 import com.bothbubbles.ui.chat.ChatSendMode
 import com.bothbubbles.ui.chat.composer.ComposerTutorialState
@@ -294,9 +295,8 @@ private fun SendButtonContent(
                 )
                 Text(
                     text = "MMS",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = contentColor,
-                    fontSize = 8.sp
+                    style = AppTextStyles.badgeMicro,
+                    color = contentColor
                 )
             }
         } else {
