@@ -38,6 +38,12 @@ class SettingsDataStore @Inject constructor(
     private val featurePrefs = FeaturePreferences(dataStore)
 
     /**
+     * Exposes the internal ServerPreferences instance for DI.
+     * This ensures all code uses the same instance and DataStore file.
+     */
+    fun getServerPreferences(): ServerPreferences = serverPrefs
+
+    /**
      * Exposes the internal FeaturePreferences instance for DI.
      * This ensures all code uses the same instance and DataStore file.
      */

@@ -6,7 +6,7 @@ This directory contains exported Room database schemas used for migration testin
 
 Each JSON file represents a specific database version. Files are auto-generated when building the app and should be committed to version control.
 
-Current database version: **51** (see `BothBubblesDatabase.kt` for latest version)
+Current database version: **66** (see `BothBubblesDatabase.kt` for latest version)
 
 ## Adding New Columns or Tables
 
@@ -169,6 +169,6 @@ This ensures we never silently lose user data due to a missing migration.
 
 See `DatabaseMigrations.kt` for the complete migration history. The database has grown significantly with many tables and columns added over time.
 
-Current version: **51**
+Current version: **66**
 
 Key entities include: ChatEntity, MessageEntity, HandleEntity, AttachmentEntity, PendingMessageEntity, ScheduledMessageEntity, UnifiedChatEntity, and more.

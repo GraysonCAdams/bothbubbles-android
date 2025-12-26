@@ -1906,6 +1906,90 @@ object DatabaseMigrations {
     }
 
     /**
+     * Migration 64→65: Add stitch_id column for Seam Migration Stage 1.
+     *
+     * This is Stage 1 of the seam migration, which prepares the database for supporting
+     * multiple messaging backends (BlueBubbles server and future direct iMessage connection).
+     *
+     * The stitch_id column identifies which messaging backend ("stitch") a message came from:
+     * - "bluebubbles": Messages from BlueBubbles server (IMESSAGE, SERVER_SMS)
+     * - "sms": Messages from local Android SMS/MMS (LOCAL_SMS, LOCAL_MMS)
+     *
+     * Design decision: Non-null with default "sms" to simplify queries.
+     * This avoids null checks like: WHERE stitch_id = 'bluebubbles' OR stitch_id IS NULL
+     * Instead: WHERE stitch_id IN ('sms', 'bluebubbles')
+     *
+     * The migration:
+     * 1. Adds stitch_id column with default 'sms'
+     * 2. Creates indexes for efficient filtering by stitch_id
+     * 3. Backfills existing messages based on message_source
+     */
+    val MIGRATION_64_65 = object : Migration(64, 65) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            Timber.i("Starting migration 64→65: Add stitch_id column for Seam Migration Stage 1")
+
+            // Add stitch_id column with default 'sms'
+            db.execSQL("ALTER TABLE messages ADD COLUMN stitch_id TEXT NOT NULL DEFAULT 'sms'")
+
+            // Create indexes for efficient stitch_id queries
+            // Index 1: Pagination by stitch - enables filtering messages by backend source
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_messages_stitch_id_date_created_date_deleted_guid ON messages(stitch_id, date_created, date_deleted, guid)")
+
+            // Index 2: Pinned messages by stitch - for filtering pinned messages by backend
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_messages_stitch_id_is_pinned ON messages(stitch_id, is_pinned)")
+
+            // Index 3: Unified chat + stitch filtering - for merged conversations with stitch filtering
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_messages_unified_chat_id_stitch_id ON messages(unified_chat_id, stitch_id)")
+
+            // Backfill existing messages based on message_source
+            // BlueBubbles server messages: IMESSAGE and SERVER_SMS
+            db.execSQL("""
+                UPDATE messages
+                SET stitch_id = 'bluebubbles'
+                WHERE message_source IN ('IMESSAGE', 'SERVER_SMS')
+            """.trimIndent())
+
+            // Local Android messages: LOCAL_SMS and LOCAL_MMS (already default 'sms')
+            db.execSQL("""
+                UPDATE messages
+                SET stitch_id = 'sms'
+                WHERE message_source IN ('LOCAL_SMS', 'LOCAL_MMS')
+            """.trimIndent())
+
+            Timber.i("Migration 64→65 complete: Added stitch_id column and backfilled existing messages")
+        }
+    }
+
+    /**
+     * Migration 65→66: Rename BlueBubbles-specific tables with bb_ prefix (Seam Migration Stage 8).
+     *
+     * This is Stage 8 of the seam migration, which renames BlueBubbles-specific operational
+     * tables with the bb_ prefix to clearly identify stitch-owned data.
+     *
+     * Tables renamed:
+     * - sync_ranges → bb_sync_range
+     * - imessage_availability_cache → bb_imessage_cache
+     *
+     * SQLite's ALTER TABLE RENAME automatically handles:
+     * - Preserving all data
+     * - Updating index references
+     * - Maintaining constraints
+     */
+    val MIGRATION_65_66 = object : Migration(65, 66) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            Timber.i("Starting migration 65→66: Rename BlueBubbles-specific tables with bb_ prefix")
+
+            // Rename sync_ranges table to bb_sync_range
+            db.execSQL("ALTER TABLE sync_ranges RENAME TO bb_sync_range")
+
+            // Rename imessage_availability_cache table to bb_imessage_cache
+            db.execSQL("ALTER TABLE imessage_availability_cache RENAME TO bb_imessage_cache")
+
+            Timber.i("Migration 65→66 complete: Renamed sync_ranges → bb_sync_range, imessage_availability_cache → bb_imessage_cache")
+        }
+    }
+
+    /**
      * List of all migrations for use with databaseBuilder.
      *
      * IMPORTANT: Always add new migrations to this array!
@@ -1974,6 +2058,8 @@ object DatabaseMigrations {
         MIGRATION_60_61,
         MIGRATION_61_62,
         MIGRATION_62_63,
-        MIGRATION_63_64
+        MIGRATION_63_64,
+        MIGRATION_64_65,
+        MIGRATION_65_66
     )
 }

@@ -11,6 +11,7 @@ import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.MessageSource
+import com.bothbubbles.seam.stitches.StitchRegistry
 import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.di.IoDispatcher
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -34,6 +35,7 @@ class MmsSendService @Inject constructor(
     private val messageDao: MessageDao,
     private val chatDao: ChatDao,
     private val smsPermissionHelper: SmsPermissionHelper,
+    private val stitchRegistry: StitchRegistry,
     @ApplicationScope private val applicationScope: CoroutineScope,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
@@ -47,6 +49,14 @@ class MmsSendService @Inject constructor(
 
     // Use the improved PDU builder
     private val pduBuilder = MmsPduBuilder(context)
+
+    /**
+     * Gets the stitch ID for a chat.
+     * Returns "sms" for local MMS chats.
+     */
+    private fun getStitchId(chatGuid: String): String {
+        return stitchRegistry.getStitchForChat(chatGuid)?.id ?: "sms"
+    }
 
     /**
      * Send an MMS message
@@ -95,6 +105,7 @@ class MmsSendService @Inject constructor(
                 } else {
                     // Temp message was deleted (race condition) - create new one
                     Timber.w("Temp message $tempGuid not found after replaceGuid, creating new message")
+                    val stitchId = getStitchId(chatGuid)
                     message = MessageEntity(
                         guid = messageGuid,
                         chatGuid = chatGuid,
@@ -105,6 +116,7 @@ class MmsSendService @Inject constructor(
                         isFromMe = true,
                         hasAttachments = attachments.isNotEmpty(),
                         messageSource = MessageSource.LOCAL_MMS.name,
+                        stitchId = stitchId,
                         smsStatus = "pending",
                         simSlot = if (subscriptionId >= 0) subscriptionId else null,
                         smsId = providerMessage?.id,
@@ -114,6 +126,7 @@ class MmsSendService @Inject constructor(
                 }
             } else {
                 // No temp GUID provided - insert new message (standalone send or retry)
+                val stitchId = getStitchId(chatGuid)
                 message = MessageEntity(
                     guid = messageGuid,
                     chatGuid = chatGuid,
@@ -124,6 +137,7 @@ class MmsSendService @Inject constructor(
                     isFromMe = true,
                     hasAttachments = attachments.isNotEmpty(),
                     messageSource = MessageSource.LOCAL_MMS.name,
+                    stitchId = stitchId,
                     smsStatus = "pending",
                     simSlot = if (subscriptionId >= 0) subscriptionId else null,
                     smsId = providerMessage?.id,

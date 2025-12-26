@@ -806,6 +806,27 @@ interface MessageDao {
         excludeGuid: String? = null
     ): MessageEntity?
 
+    /**
+     * Get messages with incorrect stitch_id for migration.
+     * Finds messages where stitch_id doesn't match the expected value from message_source.
+     *
+     * Expected mappings:
+     * - IMESSAGE, SERVER_SMS -> stitch_id = 'bluebubbles'
+     * - LOCAL_SMS, LOCAL_MMS -> stitch_id = 'sms'
+     *
+     * Used by StitchIdMigrationWorker to backfill messages that may have been missed
+     * by MIGRATION_64_65 or have incorrect values.
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE (
+            (message_source IN ('IMESSAGE', 'SERVER_SMS') AND stitch_id != 'bluebubbles')
+            OR (message_source IN ('LOCAL_SMS', 'LOCAL_MMS') AND stitch_id != 'sms')
+        )
+        LIMIT :limit
+    """)
+    suspend fun getMessagesWithIncorrectStitchId(limit: Int): List<MessageEntity>
+
     // ===== Inserts/Updates =====
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
@@ -837,6 +858,9 @@ interface MessageDao {
 
     @Query("UPDATE messages SET message_source = :messageSource WHERE guid = :guid")
     suspend fun updateMessageSource(guid: String, messageSource: String)
+
+    @Query("UPDATE messages SET stitch_id = :stitchId WHERE guid = :guid")
+    suspend fun updateStitchId(guid: String, stitchId: String)
 
     @Query("UPDATE messages SET date_played = :datePlayed WHERE guid = :guid")
     suspend fun updateDatePlayed(guid: String, datePlayed: Long)

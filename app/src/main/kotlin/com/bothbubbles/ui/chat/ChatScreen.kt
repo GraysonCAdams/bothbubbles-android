@@ -397,9 +397,16 @@ fun ChatScreen(
     // Note: LaunchedEffects for chat deletion, captured photos, edited attachments,
     // shared content, and search activation are now in ChatScreenEffects
 
+    // Collect stitch capabilities for the current chat
+    val stitchCapabilities by viewModel.stitchCapabilities.collectAsStateWithLifecycle()
+
     // Provide ExoPlayerPool to video composables for pooled player management
     // This limits active video players and auto-evicts oldest when scrolling
-    CompositionLocalProvider(LocalExoPlayerPool provides viewModel.exoPlayerPool) {
+    // Provide stitch capabilities to child composables to hide iMessage-only features in SMS chats
+    CompositionLocalProvider(
+        LocalExoPlayerPool provides viewModel.exoPlayerPool,
+        com.bothbubbles.ui.LocalStitchCapabilities provides stitchCapabilities
+    ) {
 
     // PERF FIX: Track topBar/bottomBar heights for content padding
     // This avoids SubcomposeLayout which has O(N) overhead with message list

@@ -26,6 +26,9 @@ import com.bothbubbles.util.error.NetworkError
 import com.bothbubbles.util.error.SmsError
 import com.bothbubbles.util.error.safeCall
 import com.bothbubbles.util.parsing.HtmlEntityDecoder
+import com.bothbubbles.seam.stitches.Stitch
+import com.bothbubbles.seam.stitches.StitchCapabilities
+import com.bothbubbles.seam.stitches.StitchRegistry
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -104,7 +107,8 @@ class MessageSendingService @Inject constructor(
     private val socketService: SocketService,
     private val settingsDataStore: SettingsDataStore,
     private val chatFallbackTracker: ChatFallbackTracker,
-    private val strategies: Set<@JvmSuppressWildcards MessageSenderStrategy>
+    private val strategies: Set<@JvmSuppressWildcards MessageSenderStrategy>,
+    private val stitchRegistry: StitchRegistry
 ) : MessageSender {
 
     companion object {
@@ -147,6 +151,50 @@ class MessageSendingService @Inject constructor(
     override fun resetUploadProgress() {
         _uploadProgress.value = null
     }
+
+    // ===== Stitch Routing & Capability Queries =====
+
+    /**
+     * Gets the Stitch responsible for the given chat.
+     */
+    fun getStitchForChat(chatGuid: String): Stitch? {
+        // First try exact prefix match
+        stitchRegistry.getStitchForChat(chatGuid)?.let { return it }
+
+        // Also check for mms;-; prefix for SmsStitch
+        if (chatGuid.startsWith("mms;-;")) {
+            return stitchRegistry.getStitchById("sms")
+        }
+
+        return null
+    }
+
+    /**
+     * Checks if a chat's stitch supports a specific capability.
+     */
+    fun hasCapability(chatGuid: String, capability: (StitchCapabilities) -> Boolean): Boolean {
+        val stitch = getStitchForChat(chatGuid) ?: return false
+        return capability(stitch.capabilities)
+    }
+
+    // Convenience methods:
+    fun supportsReactions(chatGuid: String): Boolean =
+        hasCapability(chatGuid) { it.supportsReactions }
+
+    fun supportsTypingIndicators(chatGuid: String): Boolean =
+        hasCapability(chatGuid) { it.supportsTypingIndicators }
+
+    fun supportsReadReceipts(chatGuid: String): Boolean =
+        hasCapability(chatGuid) { it.supportsReadReceipts }
+
+    fun supportsEffects(chatGuid: String): Boolean =
+        hasCapability(chatGuid) { it.supportsMessageEffects }
+
+    fun supportsEditing(chatGuid: String): Boolean =
+        hasCapability(chatGuid) { it.supportsMessageEditing }
+
+    fun supportsUnsend(chatGuid: String): Boolean =
+        hasCapability(chatGuid) { it.supportsMessageUnsend }
 
     // ===== Unified Send Operations =====
 

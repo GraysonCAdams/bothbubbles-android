@@ -21,7 +21,7 @@ import androidx.room.PrimaryKey
  * - endTimestamp = newest message date in the range
  */
 @Entity(
-    tableName = "sync_ranges",
+    tableName = "bb_sync_range",
     indices = [
         Index(value = ["chat_guid"]),
         Index(value = ["chat_guid", "start_timestamp", "end_timestamp"])

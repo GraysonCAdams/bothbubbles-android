@@ -13,6 +13,7 @@ import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.MessageSource
+import com.bothbubbles.seam.stitches.StitchRegistry
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -28,7 +29,8 @@ class SmsSendService @Inject constructor(
     @ApplicationContext private val context: Context,
     private val messageDao: MessageDao,
     private val chatDao: ChatDao,
-    private val smsPermissionHelper: SmsPermissionHelper
+    private val smsPermissionHelper: SmsPermissionHelper,
+    private val stitchRegistry: StitchRegistry
 ) {
     companion object {
         private const val TAG = "SmsSendService"
@@ -36,6 +38,14 @@ class SmsSendService @Inject constructor(
         const val ACTION_SMS_DELIVERED = "com.bothbubbles.SMS_DELIVERED"
         const val EXTRA_MESSAGE_GUID = "message_guid"
         const val EXTRA_PART_INDEX = "part_index"
+    }
+
+    /**
+     * Gets the stitch ID for a chat.
+     * Returns "sms" for local SMS chats.
+     */
+    private fun getStitchId(chatGuid: String): String {
+        return stitchRegistry.getStitchForChat(chatGuid)?.id ?: "sms"
     }
 
     /**
@@ -87,6 +97,7 @@ class SmsSendService @Inject constructor(
                 } else {
                     // Temp message was deleted (race condition) - create new one
                     Timber.w("Temp message $tempGuid not found after replaceGuid, creating new message")
+                    val stitchId = getStitchId(chatGuid)
                     message = MessageEntity(
                         guid = messageGuid,
                         chatGuid = chatGuid,
@@ -95,6 +106,7 @@ class SmsSendService @Inject constructor(
                         dateCreated = timestamp,
                         isFromMe = true,
                         messageSource = MessageSource.LOCAL_SMS.name,
+                        stitchId = stitchId,
                         smsStatus = "pending",
                         simSlot = if (subscriptionId >= 0) subscriptionId else null,
                         smsId = providerMessage?.id,
@@ -105,6 +117,7 @@ class SmsSendService @Inject constructor(
                 }
             } else {
                 // No temp GUID provided - insert new message (standalone send or retry)
+                val stitchId = getStitchId(chatGuid)
                 message = MessageEntity(
                     guid = messageGuid,
                     chatGuid = chatGuid,
@@ -113,6 +126,7 @@ class SmsSendService @Inject constructor(
                     dateCreated = timestamp,
                     isFromMe = true,
                     messageSource = MessageSource.LOCAL_SMS.name,
+                    stitchId = stitchId,
                     smsStatus = "pending",
                     simSlot = if (subscriptionId >= 0) subscriptionId else null,
                     smsId = providerMessage?.id,

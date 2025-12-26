@@ -11,16 +11,16 @@ interface IMessageCacheDao {
 
     // ===== Queries =====
 
-    @Query("SELECT * FROM imessage_availability_cache WHERE normalized_address = :address")
+    @Query("SELECT * FROM bb_imessage_cache WHERE normalized_address = :address")
     suspend fun getCache(address: String): IMessageAvailabilityCacheEntity?
 
-    @Query("SELECT * FROM imessage_availability_cache WHERE check_result = 'UNREACHABLE'")
+    @Query("SELECT * FROM bb_imessage_cache WHERE check_result = 'UNREACHABLE'")
     suspend fun getUnreachableAddresses(): List<IMessageAvailabilityCacheEntity>
 
-    @Query("SELECT * FROM imessage_availability_cache WHERE session_id != :currentSessionId")
+    @Query("SELECT * FROM bb_imessage_cache WHERE session_id != :currentSessionId")
     suspend fun getEntriesFromPreviousSessions(currentSessionId: String): List<IMessageAvailabilityCacheEntity>
 
-    @Query("SELECT COUNT(*) FROM imessage_availability_cache")
+    @Query("SELECT COUNT(*) FROM bb_imessage_cache")
     suspend fun getCacheSize(): Int
 
     // ===== Inserts/Updates =====
@@ -33,15 +33,15 @@ interface IMessageCacheDao {
 
     // ===== Deletes =====
 
-    @Query("DELETE FROM imessage_availability_cache WHERE normalized_address = :address")
+    @Query("DELETE FROM bb_imessage_cache WHERE normalized_address = :address")
     suspend fun delete(address: String)
 
-    @Query("DELETE FROM imessage_availability_cache WHERE expires_at > 0 AND expires_at < :now")
+    @Query("DELETE FROM bb_imessage_cache WHERE expires_at > 0 AND expires_at < :now")
     suspend fun deleteExpired(now: Long = System.currentTimeMillis())
 
-    @Query("DELETE FROM imessage_availability_cache WHERE check_result = 'UNREACHABLE'")
+    @Query("DELETE FROM bb_imessage_cache WHERE check_result = 'UNREACHABLE'")
     suspend fun deleteAllUnreachable()
 
-    @Query("DELETE FROM imessage_availability_cache")
+    @Query("DELETE FROM bb_imessage_cache")
     suspend fun deleteAll()
 }

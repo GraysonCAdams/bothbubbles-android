@@ -12,7 +12,9 @@ import com.bothbubbles.services.ActiveConversationManager
 import com.bothbubbles.services.media.ExoPlayerPool
 import com.bothbubbles.services.notifications.Notifier
 import com.bothbubbles.services.messaging.ChatFallbackTracker
+import com.bothbubbles.services.messaging.MessageSendingService
 import com.bothbubbles.services.socket.SocketConnection
+import com.bothbubbles.seam.stitches.StitchCapabilities
 import com.bothbubbles.ui.chat.composer.ComposerEvent
 import com.bothbubbles.ui.chat.composer.MentionSuggestion
 import com.bothbubbles.ui.chat.delegates.ChatAttachmentDelegate
@@ -91,6 +93,7 @@ class ChatViewModel @Inject constructor(
     private val chatFallbackTracker: ChatFallbackTracker,
     private val activeConversationManager: ActiveConversationManager,
     private val notifier: Notifier,
+    private val messageSendingService: MessageSendingService,
     // Delegate factories for AssistedInject pattern
     private val sendFactory: ChatSendDelegate.Factory,
     private val attachmentFactory: ChatAttachmentDelegate.Factory,
@@ -119,6 +122,11 @@ class ChatViewModel @Inject constructor(
     }
 
     private val chatGuid: String = checkNotNull(savedStateHandle["chatGuid"])
+
+    // Stitch capabilities for the current chat - used by UI to show/hide features
+    val stitchCapabilities: StateFlow<StitchCapabilities?> = MutableStateFlow(
+        messageSendingService.getStitchForChat(chatGuid)?.capabilities
+    ).asStateFlow()
 
     // For merged conversations (iMessage + SMS), contains all chat GUIDs
     // If mergedGuids is null or has single entry, this is a regular (non-merged) chat

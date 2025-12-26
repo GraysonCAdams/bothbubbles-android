@@ -31,6 +31,7 @@ import com.bothbubbles.ui.chat.composer.RecordingState
 import com.bothbubbles.ui.chat.composer.panels.GifItem
 import com.bothbubbles.ui.components.input.SmartReplyChips
 import com.bothbubbles.ui.components.input.SuggestionItem
+import com.bothbubbles.ui.LocalStitchCapabilities
 
 /**
  * Extracted input area component containing:
@@ -88,6 +89,9 @@ fun ChatInputUI(
 ) {
     val context = LocalContext.current
     val hapticFeedback = LocalHapticFeedback.current
+
+    // Get stitch capabilities to check if effects are supported
+    val stitchCapabilities = LocalStitchCapabilities.current
 
     // PERF FIX: Collect composerState internally to avoid parent (ChatScreen) recomposition on every keystroke
     val composerState by composerDelegate.state.collectAsStateWithLifecycle()
@@ -175,8 +179,9 @@ fun ChatInputUI(
                 when (event) {
                     is ComposerEvent.OpenCamera -> onCameraClick()
                     is ComposerEvent.SendLongPress -> {
-                        // Effect picker disabled in bubble mode and for SMS
-                        if (!isLocalSmsChat && !isBubbleMode) {
+                        // Effect picker disabled in bubble mode and for chats that don't support effects
+                        val supportsEffects = stitchCapabilities?.supportsMessageEffects ?: false
+                        if (supportsEffects && !isBubbleMode) {
                             hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
                             onShowEffectPicker()
                         }

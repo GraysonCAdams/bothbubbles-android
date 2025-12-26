@@ -28,6 +28,7 @@ import com.bothbubbles.data.local.db.entity.PendingAttachmentEntity
 import com.bothbubbles.data.local.db.entity.PendingMessageEntity
 import com.bothbubbles.data.local.db.entity.PendingSyncStatus
 import com.bothbubbles.core.network.api.BothBubblesApi
+import com.bothbubbles.seam.stitches.StitchRegistry
 import com.bothbubbles.services.messaging.AttachmentPersistenceManager
 import com.bothbubbles.services.messaging.MessageDeliveryMode
 import com.bothbubbles.services.messaging.MessageSendWorker
@@ -64,10 +65,18 @@ class PendingMessageRepository @Inject constructor(
     private val chatDao: ChatDao,
     private val unifiedChatDao: UnifiedChatDao,
     private val attachmentPersistenceManager: AttachmentPersistenceManager,
-    private val api: BothBubblesApi
+    private val api: BothBubblesApi,
+    private val stitchRegistry: StitchRegistry
 ) : PendingMessageSource {
 
     private val workManager: WorkManager by lazy { WorkManager.getInstance(context) }
+
+    /**
+     * Gets the stitch ID for a chat.
+     */
+    private fun getStitchId(chatGuid: String): String {
+        return stitchRegistry.getStitchForChat(chatGuid)?.id ?: "sms"
+    }
 
     // ============================================================================
     // GLOBAL DUPLICATE DETECTION (Singleton-level tracking across all chats)
@@ -190,6 +199,7 @@ class PendingMessageRepository @Inject constructor(
         // Use transaction to ensure atomicity: all-or-nothing for DB operations
         val messageId = database.withTransaction {
             // 1. Create pending message (durability/retry engine)
+            val stitchId = getStitchId(chatGuid)
             val pendingMessage = PendingMessageEntity(
                 localId = clientGuid,
                 chatGuid = chatGuid,
@@ -202,7 +212,8 @@ class PendingMessageRepository @Inject constructor(
                 createdAt = createdAt,
                 attributedBodyJson = attributedBodyJson,
                 dependsOnLocalId = dependsOnLocalId,
-                splitBatchId = splitBatchId
+                splitBatchId = splitBatchId,
+                stitchId = stitchId
             )
             val pendingId = pendingMessageDao.insert(pendingMessage)
 
@@ -344,6 +355,7 @@ class PendingMessageRepository @Inject constructor(
 
         val messageId = database.withTransaction {
             // 1. Create pending message
+            val stitchId = getStitchId(chatGuid)
             val pendingMessage = PendingMessageEntity(
                 localId = clientGuid,
                 chatGuid = chatGuid,
@@ -358,7 +370,8 @@ class PendingMessageRepository @Inject constructor(
                 dependsOnLocalId = dependsOnLocalId,
                 splitBatchId = splitBatchId,
                 isLinkEmbed = true,
-                linkEmbedUrl = url
+                linkEmbedUrl = url,
+                stitchId = stitchId
             )
             val pendingId = pendingMessageDao.insert(pendingMessage)
 

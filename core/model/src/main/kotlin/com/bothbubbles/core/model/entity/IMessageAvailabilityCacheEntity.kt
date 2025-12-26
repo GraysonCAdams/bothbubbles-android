@@ -18,7 +18,7 @@ import androidx.room.PrimaryKey
  * to ensure cache hits across different input formats.
  */
 @Entity(
-    tableName = "imessage_availability_cache",
+    tableName = "bb_imessage_cache",
     indices = [
         Index(value = ["check_result"]),
         Index(value = ["expires_at"])

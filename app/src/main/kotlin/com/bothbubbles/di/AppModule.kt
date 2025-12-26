@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.work.WorkManager
 import coil.ImageLoader
 import com.bothbubbles.core.data.prefs.FeaturePreferences
+import com.bothbubbles.core.data.prefs.ServerPreferences
 import com.bothbubbles.core.data.prefs.SettingsDataStore
 import com.bothbubbles.core.data.prefs.SyncPreferences
 import dagger.Module
@@ -35,6 +36,16 @@ object AppModule {
     fun provideImageLoader(@ApplicationContext context: Context): ImageLoader {
         // Coil 3.x: ImageLoaderFactory creates the ImageLoader via newImageLoader()
         return (context.applicationContext as coil.ImageLoaderFactory).newImageLoader()
+    }
+
+    /**
+     * Provides ServerPreferences from SettingsDataStore to ensure all code uses the same
+     * DataStore instance.
+     */
+    @Provides
+    @Singleton
+    fun provideServerPreferences(settingsDataStore: SettingsDataStore): ServerPreferences {
+        return settingsDataStore.getServerPreferences()
     }
 
     /**

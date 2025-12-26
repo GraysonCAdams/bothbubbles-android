@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.bothbubbles.ui.chat.ChatScreenState
+import com.bothbubbles.ui.LocalStitchCapabilities
 import com.bothbubbles.ui.components.message.JumpToBottomIndicator
 import com.bothbubbles.ui.components.message.MessageUiModel
 import com.bothbubbles.ui.components.message.Tapback
@@ -71,6 +72,9 @@ fun MessageListOverlays(
     val scrollScope = rememberCoroutineScope()
     val density = LocalDensity.current
     val view = LocalView.current
+
+    // Get stitch capabilities to determine if reactions are supported
+    val stitchCapabilities = LocalStitchCapabilities.current
 
     // Get safe area top (status bar height)
     val safeAreaTop = remember(view) {
@@ -133,15 +137,18 @@ fun MessageListOverlays(
         )
 
         // Build focus state from selected message
-        val focusState = remember(selectedMessageForTapback, selectedMessageBounds, isServerConnected) {
+        val focusState = remember(selectedMessageForTapback, selectedMessageBounds, isServerConnected, stitchCapabilities) {
             if (selectedMessageForTapback != null && selectedMessageBounds != null) {
+                // Check if reactions are supported by the stitch
+                val supportsReactions = stitchCapabilities?.supportsReactions ?: false
+
                 MessageFocusState(
                     visible = true,
                     messageId = selectedMessageForTapback.guid,
                     messageBounds = selectedMessageBounds,
                     isFromMe = selectedMessageForTapback.isFromMe,
                     myReactions = selectedMessageForTapback.myReactions.toImmutableSet(),
-                    canReact = selectedMessageForTapback.isServerOrigin && isServerConnected,
+                    canReact = selectedMessageForTapback.isServerOrigin && isServerConnected && supportsReactions,
                     canCopy = !selectedMessageForTapback.text.isNullOrBlank(),
                     canForward = true,
                     canReply = selectedMessageForTapback.isServerOrigin,

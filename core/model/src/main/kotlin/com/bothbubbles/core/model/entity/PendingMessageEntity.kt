@@ -146,7 +146,20 @@ data class PendingMessageEntity(
      * Only populated when [isLinkEmbed] is true.
      */
     @ColumnInfo(name = "link_embed_url")
-    val linkEmbedUrl: String? = null
+    val linkEmbedUrl: String? = null,
+
+    /**
+     * Identifies the messaging "stitch" (backend source) for this pending message.
+     * Used to preserve the stitch through the offline queue.
+     *
+     * Values:
+     * - "bluebubbles": iMessage via BlueBubbles server
+     * - "sms": Local Android SMS/MMS
+     *
+     * Non-null with default "sms" to simplify queries.
+     */
+    @ColumnInfo(name = "stitch_id", defaultValue = "sms")
+    val stitchId: String = "sms"
 )
 
 /**

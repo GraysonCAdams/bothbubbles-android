@@ -23,7 +23,7 @@ interface SyncRangeDao {
      * Get all sync ranges for a chat, ordered by timestamp.
      */
     @Query("""
-        SELECT * FROM sync_ranges
+        SELECT * FROM bb_sync_range
         WHERE chat_guid = :chatGuid
         ORDER BY start_timestamp DESC
     """)
@@ -33,7 +33,7 @@ interface SyncRangeDao {
      * Observe sync ranges for a chat.
      */
     @Query("""
-        SELECT * FROM sync_ranges
+        SELECT * FROM bb_sync_range
         WHERE chat_guid = :chatGuid
         ORDER BY start_timestamp DESC
     """)
@@ -44,7 +44,7 @@ interface SyncRangeDao {
      * Returns the range if found, null otherwise.
      */
     @Query("""
-        SELECT * FROM sync_ranges
+        SELECT * FROM bb_sync_range
         WHERE chat_guid = :chatGuid
         AND start_timestamp <= :timestamp
         AND end_timestamp >= :timestamp
@@ -57,7 +57,7 @@ interface SyncRangeDao {
      * Used for merging adjacent ranges.
      */
     @Query("""
-        SELECT * FROM sync_ranges
+        SELECT * FROM bb_sync_range
         WHERE chat_guid = :chatGuid
         AND NOT (end_timestamp < :startTimestamp OR start_timestamp > :endTimestamp)
         ORDER BY start_timestamp ASC
@@ -73,7 +73,7 @@ interface SyncRangeDao {
      * Returns null if no ranges exist.
      */
     @Query("""
-        SELECT MIN(start_timestamp) FROM sync_ranges
+        SELECT MIN(start_timestamp) FROM bb_sync_range
         WHERE chat_guid = :chatGuid
     """)
     suspend fun getOldestSyncedTimestamp(chatGuid: String): Long?
@@ -83,7 +83,7 @@ interface SyncRangeDao {
      * Returns null if no ranges exist.
      */
     @Query("""
-        SELECT MAX(end_timestamp) FROM sync_ranges
+        SELECT MAX(end_timestamp) FROM bb_sync_range
         WHERE chat_guid = :chatGuid
     """)
     suspend fun getNewestSyncedTimestamp(chatGuid: String): Long?
@@ -92,7 +92,7 @@ interface SyncRangeDao {
      * Check if a chat has any synced ranges.
      */
     @Query("""
-        SELECT EXISTS(SELECT 1 FROM sync_ranges WHERE chat_guid = :chatGuid LIMIT 1)
+        SELECT EXISTS(SELECT 1 FROM bb_sync_range WHERE chat_guid = :chatGuid LIMIT 1)
     """)
     suspend fun hasSyncedRanges(chatGuid: String): Boolean
 
@@ -100,14 +100,14 @@ interface SyncRangeDao {
      * Check if there are any sync ranges at all.
      * Used to detect post-migration state (empty tables after data reset).
      */
-    @Query("SELECT COUNT(*) FROM sync_ranges")
+    @Query("SELECT COUNT(*) FROM bb_sync_range")
     suspend fun getCount(): Int
 
     /**
-     * Check if the sync_ranges table is empty.
+     * Check if the bb_sync_range table is empty.
      * Returns true if no ranges exist (indicates fresh install or post-migration reset).
      */
-    @Query("SELECT NOT EXISTS(SELECT 1 FROM sync_ranges LIMIT 1)")
+    @Query("SELECT NOT EXISTS(SELECT 1 FROM bb_sync_range LIMIT 1)")
     suspend fun isEmpty(): Boolean
 
     // ===== Inserts/Updates =====
@@ -120,16 +120,16 @@ interface SyncRangeDao {
 
     // ===== Deletes =====
 
-    @Query("DELETE FROM sync_ranges WHERE id = :id")
+    @Query("DELETE FROM bb_sync_range WHERE id = :id")
     suspend fun deleteRange(id: Long)
 
-    @Query("DELETE FROM sync_ranges WHERE id IN (:ids)")
+    @Query("DELETE FROM bb_sync_range WHERE id IN (:ids)")
     suspend fun deleteRanges(ids: List<Long>)
 
-    @Query("DELETE FROM sync_ranges WHERE chat_guid = :chatGuid")
+    @Query("DELETE FROM bb_sync_range WHERE chat_guid = :chatGuid")
     suspend fun deleteRangesForChat(chatGuid: String)
 
-    @Query("DELETE FROM sync_ranges")
+    @Query("DELETE FROM bb_sync_range")
     suspend fun deleteAllRanges()
 
     // ===== Transactions =====

@@ -13,6 +13,7 @@ The following READMEs define **mandatory patterns** for each layer. You MUST rea
 | `app/src/main/kotlin/com/bothbubbles/services/README.md` | Services | Service or handler changes |
 | `app/src/main/kotlin/com/bothbubbles/ui/README.md` | UI | Screen, ViewModel, or component changes |
 | `app/src/main/kotlin/com/bothbubbles/di/README.md` | DI | Module or injection changes |
+| `app/src/main/kotlin/com/bothbubbles/seam/README.md` | Seam | Stitch or Feature changes |
 | `app/src/main/kotlin/com/bothbubbles/ui/chat/delegates/README.md` | Delegates | ViewModel delegate pattern |
 | `app/schemas/README.md` | Database | Schema migrations |
 | `docs/guides/COMPOSE_BEST_PRACTICES.md` | Compose | **ANY** Compose UI code |
@@ -485,6 +486,25 @@ import com.bothbubbles.services.contacts.ContactData
 import com.bothbubbles.services.contacts.FieldOptions
 ```
 
+#### 8. Seam Architecture (Modular Messaging Platform)
+
+Seam is the modular architecture that enables BothBubbles to support multiple messaging platforms. It consists of two key abstractions:
+
+- **Stitches** - Platform integrations (SMS, BlueBubbles/iMessage)
+- **Features (Hems)** - Cross-platform enhancements (Reels feed)
+
+**Key Principles**:
+- At least one Stitch must be enabled at all times
+- Stitches wrap existing services using the wrapper pattern (don't replace)
+- Features work across ALL Stitches when possible
+- Dependency injection via Dagger Multibindings (`@IntoSet`)
+
+**For complete documentation**, see `app/src/main/kotlin/com/bothbubbles/seam/README.md`.
+
+**When creating new Stitches or Features**, use the templates:
+- `seam/stitches/_template/README.md` - Stitch implementation guide
+- `seam/hems/_template/README.md` - Feature implementation guide
+
 ## Project Structure
 
 ```
@@ -505,8 +525,26 @@ app/src/main/kotlin/com/bothbubbles/
 │   ├── NetworkModule.kt          # Retrofit, OkHttp, Moshi, BothBubblesApi
 │   ├── CoroutinesModule.kt       # Dispatchers and @ApplicationScope
 │   ├── ServiceModule.kt          # Service interface bindings (testability)
+│   ├── StitchModule.kt           # Stitch bindings (@IntoSet multibindings)
+│   ├── FeatureModule.kt          # Feature bindings (@IntoSet multibindings)
 │   ├── SmsModule.kt              # SMS/MMS dependencies (mostly auto-wired)
 │   └── FcmModule.kt              # FCM/Firebase dependencies
+│
+├── seam/                          # Modular messaging platform architecture
+│   ├── stitches/                 # Platform integrations
+│   │   ├── Stitch.kt             # Core interface
+│   │   ├── StitchConnectionState.kt  # Connection states
+│   │   ├── StitchCapabilities.kt     # Capability declarations
+│   │   ├── StitchRegistry.kt         # Collects all Stitches via DI
+│   │   ├── StitchRouter.kt           # Routes operations to Stitches
+│   │   ├── _template/                # Template for new Stitches
+│   │   ├── sms/                      # SMS/MMS Stitch
+│   │   └── bluebubbles/              # BlueBubbles/iMessage Stitch
+│   └── hems/                     # Cross-platform features (called "Feature" in code)
+│       ├── Feature.kt            # Core interface
+│       ├── FeatureRegistry.kt    # Collects all Features via DI
+│       ├── _template/            # Template for new Features
+│       └── reels/                # Reels feed Feature
 │
 ├── services/                      # Services layer
 │   ├── foreground/               # Foreground services (SocketForegroundService)

@@ -34,7 +34,11 @@ import androidx.room.PrimaryKey
         // Index for efficient pinned message queries per chat
         Index(value = ["chat_guid", "is_pinned"]),
         // Index for efficient starred (bookmarked) message queries per chat
-        Index(value = ["chat_guid", "is_bookmarked"])
+        Index(value = ["chat_guid", "is_bookmarked"]),
+        // Seam migration indexes - enable efficient filtering by stitch source
+        Index(value = ["stitch_id", "date_created", "date_deleted", "guid"]),
+        Index(value = ["stitch_id", "is_pinned"]),
+        Index(value = ["unified_chat_id", "stitch_id"])
     ],
     foreignKeys = [
         ForeignKey(
@@ -162,6 +166,19 @@ data class MessageEntity(
     // SMS/MMS specific fields stored as JSON or separate columns
     @ColumnInfo(name = "message_source")
     val messageSource: String = MessageSource.IMESSAGE.name, // IMESSAGE, SERVER_SMS, LOCAL_SMS, LOCAL_MMS
+
+    /**
+     * Identifies the messaging "stitch" (backend source) for this message.
+     * Used for Stage 2 of the seam migration to filter messages by source.
+     *
+     * Values:
+     * - "bluebubbles": iMessage via BlueBubbles server (IMESSAGE, SERVER_SMS)
+     * - "sms": Local Android SMS/MMS (LOCAL_SMS, LOCAL_MMS)
+     *
+     * Non-null with default "sms" to simplify queries (no null handling needed).
+     */
+    @ColumnInfo(name = "stitch_id", defaultValue = "sms")
+    val stitchId: String = "sms",
 
     @ColumnInfo(name = "sms_id")
     val smsId: Long? = null,

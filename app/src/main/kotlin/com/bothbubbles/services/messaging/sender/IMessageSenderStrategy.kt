@@ -40,6 +40,7 @@ import com.bothbubbles.util.error.MessageError
 import com.bothbubbles.util.parsing.HtmlEntityDecoder
 import com.bothbubbles.util.error.MessageErrorCode
 import com.bothbubbles.util.error.NetworkError
+import com.bothbubbles.seam.stitches.StitchRegistry
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -74,7 +75,8 @@ class IMessageSenderStrategy @Inject constructor(
     private val videoCompressor: VideoCompressor,
     private val imageCompressor: ImageCompressor,
     private val attachmentPersistenceManager: AttachmentPersistenceManager,
-    private val socialMediaLinkDao: SocialMediaLinkDao
+    private val socialMediaLinkDao: SocialMediaLinkDao,
+    private val stitchRegistry: StitchRegistry
 ) : MessageSenderStrategy {
 
     companion object {
@@ -130,6 +132,14 @@ class IMessageSenderStrategy @Inject constructor(
         _uploadProgress.value = null
     }
 
+    /**
+     * Gets the stitch ID for a chat.
+     * Returns "bluebubbles" for iMessage chats, "sms" for fallback.
+     */
+    private fun getStitchId(chatGuid: String): String {
+        return stitchRegistry.getStitchForChat(chatGuid)?.id ?: "bluebubbles"
+    }
+
     private suspend fun sendTextOnly(options: SendOptions, attributedBody: AttributedBodyDto?): SendResult {
         val tempGuid = options.tempGuid ?: "temp-${UUID.randomUUID()}"
 
@@ -145,6 +155,7 @@ class IMessageSenderStrategy @Inject constructor(
                 val now = System.currentTimeMillis()
                 val chat = chatDao.getChatByGuid(options.chatGuid)
                 val unifiedChatId = chat?.unifiedChatId
+                val stitchId = getStitchId(options.chatGuid)
                 val tempMessage = MessageEntity(
                     guid = tempGuid,
                     chatGuid = options.chatGuid,
@@ -155,7 +166,8 @@ class IMessageSenderStrategy @Inject constructor(
                     isFromMe = true,
                     threadOriginatorGuid = options.replyToGuid,
                     expressiveSendStyleId = options.effectId,
-                    messageSource = MessageSource.IMESSAGE.name
+                    messageSource = MessageSource.IMESSAGE.name,
+                    stitchId = stitchId
                 )
                 messageDao.insertMessage(tempMessage)
                 // Update unified chat's latest message
@@ -268,6 +280,7 @@ class IMessageSenderStrategy @Inject constructor(
             if (existingMessage == null) {
                 val chat = chatDao.getChatByGuid(options.chatGuid)
                 val unifiedChatId = chat?.unifiedChatId
+                val stitchId = getStitchId(options.chatGuid)
                 database.withTransaction {
                     val tempMessage = MessageEntity(
                         guid = tempGuid,
@@ -280,7 +293,8 @@ class IMessageSenderStrategy @Inject constructor(
                         hasAttachments = true,
                         threadOriginatorGuid = options.replyToGuid,
                         expressiveSendStyleId = options.effectId,
-                        messageSource = MessageSource.IMESSAGE.name
+                        messageSource = MessageSource.IMESSAGE.name,
+                        stitchId = stitchId
                     )
                     messageDao.insertMessage(tempMessage)
 
@@ -667,6 +681,8 @@ class IMessageSenderStrategy @Inject constructor(
             else -> MessageSource.IMESSAGE.name
         }
 
+        val stitchId = getStitchId(chatGuid)
+
         return MessageEntity(
             guid = guid,
             chatGuid = chatGuid,
@@ -697,6 +713,7 @@ class IMessageSenderStrategy @Inject constructor(
             wasDeliveredQuietly = wasDeliveredQuietly,
             didNotifyRecipient = didNotifyRecipient,
             messageSource = source,
+            stitchId = stitchId,
             isReactionDb = ReactionClassifier.isReaction(associatedMessageGuid, associatedMessageType)
         )
     }

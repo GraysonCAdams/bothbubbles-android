@@ -228,6 +228,9 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
         // Schedule background sync worker (catches messages missed by push/socket)
         initializeBackgroundSync()
 
+        // Schedule stitch_id migration worker (one-time backfill for Stage 7)
+        initializeStitchIdMigration()
+
         // Schedule Life360 sync worker (if authenticated)
         initializeLife360Sync()
 
@@ -500,6 +503,28 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
                 BackgroundSyncWorker.schedule(this@BothBubblesApp)
             } catch (e: Exception) {
                 Timber.w(e, "Error scheduling background sync")
+            }
+        }
+    }
+
+    /**
+     * Schedule stitch_id migration worker for Stage 7 of the Seam Migration.
+     *
+     * This is a one-time worker that backfills stitch_id for any messages that may have
+     * incorrect values. While MIGRATION_64_65 handles the initial backfill, this worker
+     * serves as a safety net to catch any edge cases.
+     *
+     * Uses KEEP policy to avoid running multiple times unnecessarily.
+     */
+    private fun initializeStitchIdMigration() {
+        applicationScope.launch(ioDispatcher) {
+            try {
+                val setupComplete = settingsDataStore.isSetupComplete.first()
+                if (!setupComplete) return@launch
+
+                com.bothbubbles.services.sync.StitchIdMigrationWorker.schedule(this@BothBubblesApp)
+            } catch (e: Exception) {
+                Timber.w(e, "Error scheduling stitch_id migration")
             }
         }
     }

@@ -204,7 +204,7 @@ interface ChatQueryDao {
         WHERE c.date_deleted IS NULL
         AND c.latest_message_date IS NOT NULL
         AND c.latest_message_date > 0
-        AND NOT EXISTS (SELECT 1 FROM sync_ranges sr WHERE sr.chat_guid = c.guid)
+        AND NOT EXISTS (SELECT 1 FROM bb_sync_range sr WHERE sr.chat_guid = c.guid)
         AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.chat_guid = c.guid AND m.date_deleted IS NULL)
         ORDER BY c.latest_message_date DESC
     """)
@@ -219,7 +219,7 @@ interface ChatQueryDao {
         WHERE c.date_deleted IS NULL
         AND c.latest_message_date IS NOT NULL
         AND c.latest_message_date > 0
-        AND NOT EXISTS (SELECT 1 FROM sync_ranges sr WHERE sr.chat_guid = c.guid)
+        AND NOT EXISTS (SELECT 1 FROM bb_sync_range sr WHERE sr.chat_guid = c.guid)
         AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.chat_guid = c.guid AND m.date_deleted IS NULL)
     """)
     suspend fun countChatsNeedingRepair(): Int
