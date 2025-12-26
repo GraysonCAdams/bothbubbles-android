@@ -17,6 +17,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.bothbubbles.ui.components.settings.StitchColorPalette
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -249,6 +250,26 @@ fun SmsSettingsContent(
                         }
                     }
                 }
+            }
+
+            // Bubble Color Customization
+            item {
+                Text(
+                    "Appearance",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
+
+            item {
+                StitchColorPalette(
+                    currentColor = uiState.currentBubbleColor,
+                    defaultColor = viewModel.getDefaultColor(),
+                    isUsingDefault = uiState.isUsingDefaultColor,
+                    onColorSelected = viewModel::setCustomColor,
+                    onResetToDefault = viewModel::resetColorToDefault
+                )
             }
         }
     }

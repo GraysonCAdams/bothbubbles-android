@@ -32,7 +32,8 @@ fun NavGraphBuilder.settingsNavigation(
             onLife360Click = { navController.navigate(Screen.Life360Settings(returnToSettings = true)) },
             onCalendarClick = { navController.navigate(Screen.CalendarSettings(returnToSettings = true)) },
             onStorageClick = { navController.navigate(Screen.StorageManagement(returnToSettings = true)) },
-            onAboutClick = { navController.navigate(Screen.About(returnToSettings = true)) }
+            onAboutClick = { navController.navigate(Screen.About(returnToSettings = true)) },
+            onSeamSettingsClick = { navController.navigate(Screen.SeamSettings(returnToSettings = true)) }
         )
     }
 
@@ -195,13 +196,36 @@ fun NavGraphBuilder.settingsNavigation(
         )
     }
 
-    // Auto-Responder Settings
+    // Auto-Responder Settings (legacy - redirects to rules screen)
     composable<Screen.AutoResponderSettings> { backStackEntry ->
         val route: Screen.AutoResponderSettings = backStackEntry.toRoute()
-        com.bothbubbles.ui.settings.autoresponder.AutoResponderSettingsScreen(
+        com.bothbubbles.ui.settings.autoresponder.AutoResponderRulesScreen(
             onNavigateBack = {
                 popBackStackReturningToSettings(route.returnToSettings)
+            },
+            onNavigateToEditor = { ruleId ->
+                navigate(Screen.AutoResponderRuleEditor(ruleId = ruleId ?: -1))
             }
+        )
+    }
+
+    // Auto-Responder Rules List
+    composable<Screen.AutoResponderRules> { backStackEntry ->
+        val route: Screen.AutoResponderRules = backStackEntry.toRoute()
+        com.bothbubbles.ui.settings.autoresponder.AutoResponderRulesScreen(
+            onNavigateBack = {
+                popBackStackReturningToSettings(route.returnToSettings)
+            },
+            onNavigateToEditor = { ruleId ->
+                navigate(Screen.AutoResponderRuleEditor(ruleId = ruleId ?: -1))
+            }
+        )
+    }
+
+    // Auto-Responder Rule Editor
+    composable<Screen.AutoResponderRuleEditor> {
+        com.bothbubbles.ui.settings.autoresponder.AutoResponderRuleEditorScreen(
+            onNavigateBack = { navController.popBackStack() }
         )
     }
 
@@ -268,6 +292,25 @@ fun NavGraphBuilder.settingsNavigation(
         com.bothbubbles.ui.settings.storage.StorageManagementScreen(
             onBackClick = {
                 popBackStackReturningToSettings(route.returnToSettings)
+            }
+        )
+    }
+
+    // Seam Settings (Messaging Platforms & Features)
+    composable<Screen.SeamSettings> { backStackEntry ->
+        val route: Screen.SeamSettings = backStackEntry.toRoute()
+        com.bothbubbles.ui.settings.seam.SeamSettingsScreen(
+            onNavigateBack = {
+                popBackStackReturningToSettings(route.returnToSettings)
+            },
+            onStitchSettingsClick = { settingsRoute ->
+                when (settingsRoute) {
+                    "server_settings" -> navController.navigate(Screen.ServerSettings(returnToSettings = route.returnToSettings))
+                    "sms_settings" -> navController.navigate(Screen.SmsSettings(returnToSettings = route.returnToSettings))
+                }
+            },
+            onFeatureSettingsClick = { settingsRoute ->
+                // Handle feature settings routes when they're added
             }
         )
     }

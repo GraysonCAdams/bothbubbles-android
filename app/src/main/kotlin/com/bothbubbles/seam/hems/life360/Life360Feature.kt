@@ -1,9 +1,15 @@
 package com.bothbubbles.seam.hems.life360
 
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.LocationOn
 import com.bothbubbles.core.data.prefs.FeaturePreferences
 import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.seam.hems.Feature
+import com.bothbubbles.seam.settings.DedicatedSettingsMenuItem
+import com.bothbubbles.seam.settings.SettingsContribution
+import com.bothbubbles.seam.settings.SettingsSection
 import com.bothbubbles.services.life360.Life360Service
+import com.bothbubbles.ui.settings.components.SettingsIconColors
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -43,9 +49,10 @@ class Life360Feature @Inject constructor(
 
     companion object {
         const val ID = "life360"
-        const val DISPLAY_NAME = "Life360 Integration"
+        const val DISPLAY_NAME = "Life360"
         const val DESCRIPTION = "Show contact locations from Life360 circles in your chats"
         const val FEATURE_FLAG_KEY = "life360_enabled"
+        const val SETTINGS_ROUTE = "settings/life360"
     }
 
     override val id: String = ID
@@ -66,7 +73,22 @@ class Life360Feature @Inject constructor(
             initialValue = false
         )
 
-    override val settingsRoute: String = "settings/life360"
+    @Deprecated("Use settingsContribution instead", ReplaceWith("settingsContribution"))
+    override val settingsRoute: String = SETTINGS_ROUTE
+
+    override val settingsContribution: SettingsContribution
+        get() = SettingsContribution(
+            dedicatedMenuItem = DedicatedSettingsMenuItem(
+                id = ID,
+                title = DISPLAY_NAME,
+                subtitle = "Show friends and family locations",
+                icon = Icons.Outlined.LocationOn,
+                iconTint = SettingsIconColors.Location,
+                section = SettingsSection.SHARING,
+                route = SETTINGS_ROUTE,
+                enabled = true
+            )
+        )
 
     override suspend fun onEnable() {
         // Called when feature is enabled

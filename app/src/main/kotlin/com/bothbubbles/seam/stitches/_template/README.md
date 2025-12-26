@@ -24,6 +24,7 @@ class YourStitch @Inject constructor(
         const val ID = "your_id"              // Unique identifier
         const val DISPLAY_NAME = "Your Name"  // User-facing name
         const val CHAT_GUID_PREFIX = "prefix;-;"  // Or null if not applicable
+        const val SETTINGS_ROUTE = "settings/your_stitch"  // Or null if no settings
     }
 
     override val id: String = ID
@@ -45,7 +46,23 @@ class YourStitch @Inject constructor(
     private val _isEnabled = MutableStateFlow(false)
     override val isEnabled: StateFlow<Boolean> = _isEnabled.asStateFlow()
 
-    override val settingsRoute: String? = "settings/your_stitch"  // Or null
+    @Deprecated("Use settingsContribution instead")
+    override val settingsRoute: String? = SETTINGS_ROUTE
+
+    // Settings contribution - defines how this Stitch appears in Settings
+    override val settingsContribution: SettingsContribution
+        get() = SettingsContribution(
+            dedicatedMenuItem = DedicatedSettingsMenuItem(
+                id = ID,
+                title = DISPLAY_NAME,
+                subtitle = "Configure your platform",
+                icon = Icons.Default.Settings,  // Your icon
+                iconTint = SettingsIconColors.Connectivity,
+                section = SettingsSection.CONNECTIVITY,
+                route = SETTINGS_ROUTE,
+                enabled = true
+            )
+        )
 
     override suspend fun initialize() {
         // Called on app startup

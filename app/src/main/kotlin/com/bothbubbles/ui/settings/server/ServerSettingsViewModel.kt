@@ -1,11 +1,15 @@
 package com.bothbubbles.ui.settings.server
 
+import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bothbubbles.data.local.prefs.SettingsDataStore
+import com.bothbubbles.data.repository.StitchSettingsRepository
 import com.bothbubbles.core.network.api.BothBubblesApi
 import com.bothbubbles.core.data.ConnectionState
+import com.bothbubbles.seam.stitches.bluebubbles.BlueBubblesStitch
 import com.bothbubbles.services.socket.SocketConnection
+import com.bothbubbles.ui.theme.StitchDefaultColors
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -15,7 +19,8 @@ import javax.inject.Inject
 class ServerSettingsViewModel @Inject constructor(
     private val socketConnection: SocketConnection,
     private val settingsDataStore: SettingsDataStore,
-    private val api: BothBubblesApi
+    private val api: BothBubblesApi,
+    private val stitchSettingsRepository: StitchSettingsRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ServerSettingsUiState())
@@ -25,6 +30,7 @@ class ServerSettingsViewModel @Inject constructor(
         observeConnectionState()
         observeServerSettings()
         observePrivateApiSettings()
+        observeCustomColor()
     }
 
     private fun observePrivateApiSettings() {
@@ -200,6 +206,49 @@ class ServerSettingsViewModel @Inject constructor(
     fun hideCapabilitiesDialog() {
         _uiState.update { it.copy(showCapabilitiesDialog = false) }
     }
+
+    // ===== Custom Color =====
+
+    private fun observeCustomColor() {
+        viewModelScope.launch {
+            stitchSettingsRepository.observeEffectiveColor(BlueBubblesStitch.ID, isDarkTheme = false)
+                .collect { color ->
+                    _uiState.update { it.copy(currentBubbleColor = color) }
+                }
+        }
+
+        viewModelScope.launch {
+            stitchSettingsRepository.observeAllCustomColors().collect { customColors ->
+                val hasCustom = customColors.containsKey(BlueBubblesStitch.ID)
+                _uiState.update { it.copy(isUsingDefaultColor = !hasCustom) }
+            }
+        }
+    }
+
+    /**
+     * Set a custom bubble color for iMessage/BlueBubbles messages.
+     */
+    fun setCustomColor(color: Color) {
+        viewModelScope.launch {
+            stitchSettingsRepository.setCustomColor(BlueBubblesStitch.ID, color)
+        }
+    }
+
+    /**
+     * Reset the bubble color to the default iMessage blue.
+     */
+    fun resetColorToDefault() {
+        viewModelScope.launch {
+            stitchSettingsRepository.resetColorToDefault(BlueBubblesStitch.ID)
+        }
+    }
+
+    /**
+     * Get the default bubble color for iMessage.
+     */
+    fun getDefaultColor(): Color {
+        return StitchDefaultColors.getDefaultBubbleColor(BlueBubblesStitch.ID, isDarkTheme = false)
+    }
 }
 
 data class ServerSettingsUiState(
@@ -214,7 +263,10 @@ data class ServerSettingsUiState(
     val isTesting: Boolean = false,
     val testResult: ConnectionTestResult? = null,
     val error: String? = null,
-    val showCapabilitiesDialog: Boolean = false
+    val showCapabilitiesDialog: Boolean = false,
+    // Bubble color customization
+    val currentBubbleColor: Color = StitchDefaultColors.getDefaultBubbleColor(BlueBubblesStitch.ID, false),
+    val isUsingDefaultColor: Boolean = true
 )
 
 data class ConnectionTestResult(

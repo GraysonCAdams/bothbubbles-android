@@ -1,12 +1,26 @@
 package com.bothbubbles.seam.stitches.bluebubbles
 
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Cloud
 import com.bothbubbles.core.data.ConnectionState
 import com.bothbubbles.core.data.prefs.ServerPreferences
 import com.bothbubbles.di.ApplicationScope
+import com.bothbubbles.seam.hems.autoresponder.AutoResponderQuickAddExample
+import com.bothbubbles.seam.settings.BadgeStatus
+import com.bothbubbles.seam.settings.DedicatedSettingsMenuItem
+import com.bothbubbles.seam.settings.SettingsBadge
+import com.bothbubbles.seam.settings.SettingsContribution
+import com.bothbubbles.seam.settings.SettingsSection
+import com.bothbubbles.seam.stitches.AvailabilityCheckOptions
+import com.bothbubbles.seam.stitches.AvailabilityConfidence
+import com.bothbubbles.seam.stitches.ContactAvailability
+import com.bothbubbles.seam.stitches.ContactIdentifier
+import com.bothbubbles.seam.stitches.ContactIdentifierType
 import com.bothbubbles.seam.stitches.Stitch
 import com.bothbubbles.seam.stitches.StitchCapabilities
 import com.bothbubbles.seam.stitches.StitchConnectionState
 import com.bothbubbles.services.socket.SocketConnection
+import com.bothbubbles.ui.settings.components.SettingsIconColors
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -34,6 +48,7 @@ class BlueBubblesStitch @Inject constructor(
         const val ID = "bluebubbles"
         const val DISPLAY_NAME = "iMessage"
         const val CHAT_GUID_PREFIX = "iMessage;-;"
+        const val SETTINGS_ROUTE = "server_settings"
     }
 
     override val id: String = ID
@@ -73,7 +88,41 @@ class BlueBubblesStitch @Inject constructor(
             initialValue = false
         )
 
-    override val settingsRoute: String = "server_settings"
+    @Deprecated("Use settingsContribution instead", ReplaceWith("settingsContribution"))
+    override val settingsRoute: String = SETTINGS_ROUTE
+
+    override val settingsContribution: SettingsContribution
+        get() {
+            val currentState = connectionState.value
+            val badge = when (currentState) {
+                is StitchConnectionState.Connected -> SettingsBadge.Status(BadgeStatus.CONNECTED)
+                is StitchConnectionState.NotConfigured -> SettingsBadge.Status(BadgeStatus.DISABLED)
+                else -> SettingsBadge.Status(BadgeStatus.ERROR)
+            }
+
+            return SettingsContribution(
+                dedicatedMenuItem = DedicatedSettingsMenuItem(
+                    id = ID,
+                    title = DISPLAY_NAME,
+                    subtitle = "BlueBubbles server settings",
+                    icon = Icons.Default.Cloud,
+                    iconTint = SettingsIconColors.Connectivity,
+                    section = SettingsSection.CONNECTIVITY,
+                    route = SETTINGS_ROUTE,
+                    enabled = true,
+                    badge = badge
+                )
+            )
+        }
+
+    override val autoResponderQuickAddExample: AutoResponderQuickAddExample
+        get() = AutoResponderQuickAddExample(
+            name = "iMessage Introduction",
+            message = "Hello, I am on BlueBubbles which lets me use iMessage on my Android. " +
+                "Please add my iMessage address to my contact card so future messages " +
+                "go through iMessage.",
+            description = "Introduce yourself to new iMessage contacts"
+        )
 
     override suspend fun initialize() {
         // The socket service handles its own initialization
@@ -83,5 +132,62 @@ class BlueBubblesStitch @Inject constructor(
     override suspend fun teardown() {
         // Don't disconnect the socket here - it's managed by SocketService
         // This is called when the stitch is disabled
+    }
+
+    // ===== Contact Availability =====
+
+    override val supportedIdentifierTypes: Set<ContactIdentifierType> =
+        setOf(ContactIdentifierType.PHONE_NUMBER, ContactIdentifierType.EMAIL)
+
+    override val defaultBubbleColor: Long = 0xFF007AFF  // iOS iMessage blue
+
+    override val contactPriority: Int = 100  // Prefer iMessage for rich features
+
+    override suspend fun checkContactAvailability(
+        identifier: ContactIdentifier,
+        options: AvailabilityCheckOptions
+    ): ContactAvailability {
+        // Check if this identifier type is supported
+        if (identifier.type !in supportedIdentifierTypes) {
+            return ContactAvailability.UnsupportedIdentifierType
+        }
+
+        // Email addresses are always iMessage
+        if (identifier.type == ContactIdentifierType.EMAIL) {
+            // Need server connection to send to email addresses
+            return if (connectionState.value == StitchConnectionState.Connected) {
+                ContactAvailability.Available(confidence = AvailabilityConfidence.HIGH)
+            } else {
+                ContactAvailability.Unknown(
+                    reason = "Server not connected",
+                    fallbackHint = true  // Email addresses are always iMessage
+                )
+            }
+        }
+
+        // For phone numbers, check server connection
+        // Full implementation would query IMessageAvailabilityService
+        return when (connectionState.value) {
+            StitchConnectionState.Connected -> {
+                // TODO: Query IMessageAvailabilityService for actual availability
+                // For now, return Unknown with positive hint (likely available)
+                ContactAvailability.Unknown(
+                    reason = "Availability check not yet implemented",
+                    fallbackHint = true
+                )
+            }
+            StitchConnectionState.Connecting -> {
+                ContactAvailability.Unknown(
+                    reason = "Server connecting",
+                    fallbackHint = false
+                )
+            }
+            else -> {
+                ContactAvailability.Unknown(
+                    reason = "Server not connected",
+                    fallbackHint = false
+                )
+            }
+        }
     }
 }

@@ -61,6 +61,8 @@ import com.bothbubbles.R
 import com.bothbubbles.core.data.ConnectionState
 import com.bothbubbles.core.network.api.dto.FindMyDeviceDto
 import com.bothbubbles.core.network.api.dto.FindMyFriendDto
+import com.bothbubbles.seam.settings.DedicatedSettingsMenuItem
+import com.bothbubbles.seam.settings.SettingsSection
 import kotlinx.coroutines.launch
 import com.bothbubbles.services.sound.SoundTheme
 import com.bothbubbles.ui.settings.components.BadgeStatus
@@ -96,6 +98,7 @@ fun SettingsScreen(
     onStorageClick: () -> Unit = {},
     onAboutClick: () -> Unit = {},
     onMediaContentClick: () -> Unit = {},
+    onSeamSettingsClick: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -199,6 +202,7 @@ fun SettingsScreen(
             onStorageClick = onStorageClick,
             onAboutClick = onAboutClick,
             onMediaContentClick = onMediaContentClick,
+            onSeamSettingsClick = onSeamSettingsClick,
             onRequestContactsPermission = {
                 contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
             },
@@ -246,6 +250,7 @@ fun SettingsContent(
     onStorageClick: () -> Unit = {},
     onAboutClick: () -> Unit,
     onMediaContentClick: () -> Unit = {},
+    onSeamSettingsClick: () -> Unit = {},
     onRequestContactsPermission: () -> Unit = {},
     viewModel: SettingsViewModel
 ) {
@@ -289,6 +294,8 @@ fun SettingsContent(
 
     val searchableItems = remember {
         listOf(
+            // Messaging Platforms
+            SearchableItem("platforms", "Messaging Platforms", listOf("stitch", "feature", "hem", "seam", "integration"), "Platforms"),
             // Connectivity
             SearchableItem("imessage", "iMessage", listOf("bluebubbles", "server", "mac", "apple"), "Connectivity"),
             SearchableItem("private_api", "Private API", listOf("typing", "reactions", "tapback", "read receipts", "advanced"), "Connectivity"),
@@ -350,6 +357,7 @@ fun SettingsContent(
     }
 
     // Check which sections should be visible
+    val showPlatforms = sectionMatches("platforms", "imessage", "sms")
     val showConnectivity = sectionMatches("imessage", "private_api", "typing_indicators", "sms", "sync")
     val showNotifications = sectionMatches("notifications", "message_sounds", "sound_theme")
     val showAppearance = sectionMatches("app_title", "unread_count", "effects", "swipe", "haptics", "audio_haptic")
@@ -443,10 +451,10 @@ fun SettingsContent(
                 contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp)
             ) {
         // ═══════════════════════════════════════════════════════════════
-        // SECTION 1: Connectivity
-        // Focus: The "pipes" that make the app work
+        // SECTION 0: Messaging Platforms
+        // Focus: Quick overview and link to platform management
         // ═══════════════════════════════════════════════════════════════
-        if (showConnectivity) {
+        if (showPlatforms) {
         item {
             val iMessageStatus = when (uiState.connectionState) {
                 ConnectionState.CONNECTED -> BadgeStatus.CONNECTED
@@ -467,7 +475,7 @@ fun SettingsContent(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Connectivity",
+                    text = "Messaging Platforms",
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -479,15 +487,39 @@ fun SettingsContent(
                     StatusBadge(
                         label = "iMessage",
                         status = iMessageStatus,
-                        onClick = onServerSettingsClick
+                        onClick = onSeamSettingsClick
                     )
                     StatusBadge(
                         label = "SMS",
                         status = smsStatus,
-                        onClick = onSmsSettingsClick
+                        onClick = onSeamSettingsClick
                     )
                 }
             }
+        }
+
+        item {
+            SettingsCard(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+            ) {
+                SettingsMenuItem(
+                    icon = Icons.Default.Hub,
+                    title = "Manage platforms & features",
+                    iconTint = SettingsIconColors.Connectivity,
+                    subtitle = "Configure iMessage, SMS, and cross-platform features",
+                    onClick = onSeamSettingsClick
+                )
+            }
+        }
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // SECTION 1: Connectivity
+        // Focus: The "pipes" that make the app work
+        // ═══════════════════════════════════════════════════════════════
+        if (showConnectivity) {
+        item {
+            SettingsSectionTitle(title = "Connectivity")
         }
 
         item {
@@ -877,6 +909,7 @@ fun SettingsContent(
         // ═══════════════════════════════════════════════════════════════
         // SECTION 5.5: Sharing & Social
         // Focus: Location sharing and social integrations
+        // Items contributed by Features (ETA, Life360) + Calendar (hardcoded)
         // ═══════════════════════════════════════════════════════════════
         if (showSharing) {
         item {
@@ -884,32 +917,31 @@ fun SettingsContent(
         }
 
         item {
+            // Get dynamically contributed items from Features
+            val sharingContributions = viewModel.getMenuItemsForSection(SettingsSection.SHARING)
+
+            // Route-to-callback mapping for contributed items
+            val routeCallbacks = mapOf(
+                "settings/eta" to onEtaSharingClick,
+                "settings/life360" to onLife360Click
+            )
+
             SettingsCard(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
             ) {
-                // ETA Sharing
-                SettingsMenuItem(
-                    icon = Icons.Outlined.Navigation,
-                    title = "ETA sharing",
-                    iconTint = SettingsIconColors.Location,
-                    subtitle = "Share arrival time while navigating",
-                    onClick = onEtaSharingClick
-                )
+                // Render contributed items from Features (ETA, Life360)
+                sharingContributions.forEachIndexed { index, item ->
+                    ContributedSettingsMenuItem(
+                        item = item,
+                        onClick = routeCallbacks[item.route] ?: {}
+                    )
+                    if (index < sharingContributions.size - 1 || true) {
+                        // Always show divider if there are more items or Calendar below
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    }
+                }
 
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                // Life360 Integration
-                SettingsMenuItem(
-                    icon = Icons.Outlined.LocationOn,
-                    title = "Life360",
-                    iconTint = SettingsIconColors.Location,
-                    subtitle = "Show friends and family locations",
-                    onClick = onLife360Click
-                )
-
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                // Calendar Integrations
+                // Calendar Integrations (hardcoded - no Feature yet)
                 SettingsMenuItem(
                     icon = Icons.Default.CalendarMonth,
                     title = "Calendar integrations",
@@ -1845,4 +1877,28 @@ private fun Context.findActivity(): Activity? {
         context = context.baseContext
     }
     return null
+}
+
+/**
+ * Renders a settings menu item from a Stitch or Feature contribution.
+ *
+ * This composable maps [DedicatedSettingsMenuItem] data to the [SettingsMenuItem] UI component,
+ * allowing Stitches and Features to contribute their own settings items dynamically.
+ *
+ * @param item The contributed menu item from a Stitch or Feature
+ * @param onClick The callback when the item is clicked
+ */
+@Composable
+private fun ContributedSettingsMenuItem(
+    item: DedicatedSettingsMenuItem,
+    onClick: () -> Unit
+) {
+    SettingsMenuItem(
+        icon = item.icon,
+        title = item.title,
+        subtitle = item.subtitle,
+        iconTint = item.iconTint,
+        onClick = onClick,
+        enabled = item.enabled
+    )
 }

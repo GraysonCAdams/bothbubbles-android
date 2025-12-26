@@ -14,6 +14,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
@@ -21,6 +22,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bothbubbles.core.data.ConnectionState
 import com.bothbubbles.core.model.ServerCapabilities
+import com.bothbubbles.ui.components.settings.StitchColorPalette
 import com.bothbubbles.ui.settings.components.SettingsCard
 
 private val ConnectedGreen = Color(0xFF34A853)
@@ -334,6 +336,22 @@ fun ServerSettingsContent(
                     }
                 }
             }
+
+            // Appearance Section - Bubble Color Customization
+            Text(
+                text = "Appearance",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+
+            StitchColorPalette(
+                currentColor = uiState.currentBubbleColor,
+                defaultColor = viewModel.getDefaultColor(),
+                isUsingDefault = uiState.isUsingDefaultColor,
+                onColorSelected = viewModel::setCustomColor,
+                onResetToDefault = viewModel::resetColorToDefault
+            )
         }
     }
 

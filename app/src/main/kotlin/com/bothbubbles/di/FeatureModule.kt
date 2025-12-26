@@ -1,6 +1,9 @@
 package com.bothbubbles.di
 
 import com.bothbubbles.seam.hems.Feature
+import com.bothbubbles.seam.hems.autoresponder.AutoResponderFeature
+import com.bothbubbles.seam.hems.calendar.CalendarFeature
+import com.bothbubbles.seam.hems.discord.DiscordFeature
 import com.bothbubbles.seam.hems.eta.EtaFeature
 import com.bothbubbles.seam.hems.life360.Life360Feature
 import com.bothbubbles.seam.hems.reels.ReelsFeature
@@ -24,4 +27,16 @@ abstract class FeatureModule {
     @Binds
     @IntoSet
     abstract fun bindEtaFeature(impl: EtaFeature): Feature
+
+    @Binds
+    @IntoSet
+    abstract fun bindDiscordFeature(impl: DiscordFeature): Feature
+
+    @Binds
+    @IntoSet
+    abstract fun bindCalendarFeature(impl: CalendarFeature): Feature
+
+    @Binds
+    @IntoSet
+    abstract fun bindAutoResponderFeature(impl: AutoResponderFeature): Feature
 }

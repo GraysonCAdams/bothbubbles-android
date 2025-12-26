@@ -3,6 +3,7 @@ package com.bothbubbles.seam.hems.reels
 import com.bothbubbles.core.data.prefs.FeaturePreferences
 import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.seam.hems.Feature
+import com.bothbubbles.seam.settings.SettingsContribution
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -27,6 +28,13 @@ import javax.inject.Singleton
  *
  * Videos are cached locally for offline viewing and organized chronologically
  * with unwatched content surfaced first.
+ *
+ * ## Settings Integration
+ * Reels settings are integrated into the "Media & content" settings page rather
+ * than having a dedicated settings screen. The settings are managed by
+ * [SocialMediaSettingsContent] and include:
+ * - Reels experience toggle
+ * - Include video attachments toggle
  */
 @Singleton
 class ReelsFeature @Inject constructor(
@@ -53,7 +61,14 @@ class ReelsFeature @Inject constructor(
             initialValue = false
         )
 
+    @Deprecated("Use settingsContribution instead", ReplaceWith("settingsContribution"))
     override val settingsRoute: String? = null
+
+    /**
+     * Reels settings are part of "Media & content" settings, not a dedicated page.
+     * No dedicated menu item is needed.
+     */
+    override val settingsContribution: SettingsContribution = SettingsContribution.NONE
 
     override suspend fun onEnable() {
         // Called when feature is enabled

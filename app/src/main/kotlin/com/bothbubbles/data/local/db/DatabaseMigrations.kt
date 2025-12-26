@@ -1990,6 +1990,73 @@ object DatabaseMigrations {
     }
 
     /**
+     * Migration from version 66 to 67: Add auto_responder_rules table.
+     *
+     * This table stores configurable auto-response rules with various conditions:
+     * - Source Stitch filtering (SMS, iMessage)
+     * - First-time sender detection
+     * - Time and day conditions
+     * - System state (DND, driving, on call)
+     * - Location-based geofencing
+     *
+     * Rules are evaluated in priority order - first matching rule wins.
+     */
+    val MIGRATION_66_67 = object : Migration(66, 67) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            Timber.i("Starting migration 66→67: Add auto_responder_rules table")
+
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS auto_responder_rules (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    name TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    priority INTEGER NOT NULL,
+                    is_enabled INTEGER NOT NULL DEFAULT 1,
+                    source_stitch_ids TEXT DEFAULT NULL,
+                    first_time_from_sender INTEGER DEFAULT NULL,
+                    days_of_week TEXT DEFAULT NULL,
+                    time_start_minutes INTEGER DEFAULT NULL,
+                    time_end_minutes INTEGER DEFAULT NULL,
+                    dnd_modes TEXT DEFAULT NULL,
+                    require_driving INTEGER DEFAULT NULL,
+                    require_on_call INTEGER DEFAULT NULL,
+                    location_name TEXT DEFAULT NULL,
+                    location_lat REAL DEFAULT NULL,
+                    location_lng REAL DEFAULT NULL,
+                    location_radius_meters INTEGER DEFAULT NULL,
+                    location_inside INTEGER DEFAULT NULL,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                )
+            """.trimIndent())
+
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_auto_responder_rules_priority ON auto_responder_rules(priority)")
+
+            Timber.i("Migration 66→67 complete: Created auto_responder_rules table")
+        }
+    }
+
+    /**
+     * Migration from version 67 to 68: Add stitch_custom_colors table
+     * for storing user-customized bubble colors per Stitch platform.
+     */
+    val MIGRATION_67_68 = object : Migration(67, 68) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            Timber.i("Starting migration 67→68: Add stitch_custom_colors table")
+
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS stitch_custom_colors (
+                    stitch_id TEXT NOT NULL PRIMARY KEY,
+                    bubble_color TEXT NOT NULL,
+                    updated_at INTEGER NOT NULL
+                )
+            """.trimIndent())
+
+            Timber.i("Migration 67→68 complete: Created stitch_custom_colors table")
+        }
+    }
+
+    /**
      * List of all migrations for use with databaseBuilder.
      *
      * IMPORTANT: Always add new migrations to this array!
@@ -2060,6 +2127,8 @@ object DatabaseMigrations {
         MIGRATION_62_63,
         MIGRATION_63_64,
         MIGRATION_64_65,
-        MIGRATION_65_66
+        MIGRATION_65_66,
+        MIGRATION_66_67,
+        MIGRATION_67_68
     )
 }

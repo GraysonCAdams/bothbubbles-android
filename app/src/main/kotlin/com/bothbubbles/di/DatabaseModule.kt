@@ -6,6 +6,7 @@ import com.bothbubbles.data.local.db.BothBubblesDatabase
 import com.bothbubbles.data.local.db.DatabaseMigrations
 import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.dao.AutoRespondedSenderDao
+import com.bothbubbles.data.local.db.dao.AutoResponderRuleDao
 import com.bothbubbles.data.local.db.dao.AutoShareContactDao
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.ChatParticipantDao
@@ -30,6 +31,7 @@ import com.bothbubbles.data.local.db.dao.TombstoneDao
 import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.data.local.db.dao.VerifiedCounterpartCheckDao
 import com.bothbubbles.data.local.db.dao.MessageEditHistoryDao
+import com.bothbubbles.data.local.db.dao.StitchCustomColorDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -227,5 +229,17 @@ object DatabaseModule {
     @Singleton
     fun provideCalendarEventOccurrenceDao(database: BothBubblesDatabase): CalendarEventOccurrenceDao {
         return database.calendarEventOccurrenceDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideAutoResponderRuleDao(database: BothBubblesDatabase): AutoResponderRuleDao {
+        return database.autoResponderRuleDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideStitchCustomColorDao(database: BothBubblesDatabase): StitchCustomColorDao {
+        return database.stitchCustomColorDao()
     }
 }

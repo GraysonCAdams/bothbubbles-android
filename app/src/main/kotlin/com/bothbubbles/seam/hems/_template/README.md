@@ -24,6 +24,7 @@ class YourFeature @Inject constructor(
         const val DISPLAY_NAME = "Your Feature Name"
         const val DESCRIPTION = "What your feature does"
         const val FEATURE_FLAG_KEY = "your_feature_enabled"
+        const val SETTINGS_ROUTE = "settings/your_feature"  // Or null if no settings
     }
 
     override val id: String = ID
@@ -38,7 +39,24 @@ class YourFeature @Inject constructor(
             initialValue = false
         )
 
-    override val settingsRoute: String? = "settings/your_feature"  // Or null
+    @Deprecated("Use settingsContribution instead")
+    override val settingsRoute: String? = SETTINGS_ROUTE
+
+    // Settings contribution - defines how this Feature appears in Settings
+    // Use SettingsContribution.NONE if no dedicated settings menu item is needed
+    override val settingsContribution: SettingsContribution
+        get() = SettingsContribution(
+            dedicatedMenuItem = DedicatedSettingsMenuItem(
+                id = ID,
+                title = DISPLAY_NAME,
+                subtitle = DESCRIPTION,
+                icon = Icons.Default.Extension,  // Your icon
+                iconTint = SettingsIconColors.Appearance,  // Your color
+                section = SettingsSection.MESSAGING,  // Your section
+                route = SETTINGS_ROUTE,
+                enabled = true
+            )
+        )
 
     override suspend fun onEnable() {
         // Called when feature is enabled

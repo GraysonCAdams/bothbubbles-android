@@ -2,6 +2,8 @@ package com.bothbubbles.ui.settings.seam
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.bothbubbles.core.data.prefs.SendModeBehavior
+import com.bothbubbles.data.repository.StitchSettingsRepository
 import com.bothbubbles.seam.hems.Feature
 import com.bothbubbles.seam.hems.FeatureRegistry
 import com.bothbubbles.seam.stitches.Stitch
@@ -14,6 +16,7 @@ import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -25,7 +28,8 @@ import javax.inject.Inject
 @HiltViewModel
 class SeamSettingsViewModel @Inject constructor(
     private val stitchRegistry: StitchRegistry,
-    private val featureRegistry: FeatureRegistry
+    private val featureRegistry: FeatureRegistry,
+    private val stitchSettingsRepository: StitchSettingsRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SeamSettingsUiState())
@@ -33,6 +37,47 @@ class SeamSettingsViewModel @Inject constructor(
 
     init {
         loadStitchesAndFeatures()
+        observeSettings()
+    }
+
+    private fun observeSettings() {
+        // Observe priority order and send mode behavior
+        viewModelScope.launch {
+            combine(
+                stitchSettingsRepository.observePriorityOrder(),
+                stitchSettingsRepository.observeSendModeBehavior()
+            ) { priorityOrder, sendModeBehavior ->
+                priorityOrder to sendModeBehavior
+            }.collect { (priorityOrder, sendModeBehavior) ->
+                _uiState.update { state ->
+                    val effectivePriority = priorityOrder.ifEmpty {
+                        // Default priority: BlueBubbles first, then SMS, then others
+                        state.stitches.map { it.id }
+                            .sortedWith(compareByDescending { id ->
+                                when (id) {
+                                    "bluebubbles" -> 2
+                                    "sms" -> 1
+                                    else -> 0
+                                }
+                            })
+                    }
+
+                    // Sort stitches by priority
+                    val sortedStitches = state.stitches
+                        .sortedBy { stitch ->
+                            val index = effectivePriority.indexOf(stitch.id)
+                            if (index >= 0) index else Int.MAX_VALUE
+                        }
+                        .toImmutableList()
+
+                    state.copy(
+                        stitches = sortedStitches,
+                        priorityOrder = effectivePriority.toImmutableList(),
+                        sendModeBehavior = sendModeBehavior
+                    )
+                }
+            }
+        }
     }
 
     private fun loadStitchesAndFeatures() {
@@ -137,6 +182,53 @@ class SeamSettingsViewModel @Inject constructor(
         return featureRegistry.getFeatureById(featureId)?.settingsRoute
     }
 
+    /**
+     * Reorder stitches by moving one stitch from one position to another.
+     */
+    fun reorderStitch(fromIndex: Int, toIndex: Int) {
+        val currentOrder = _uiState.value.priorityOrder.toMutableList()
+        if (fromIndex !in currentOrder.indices || toIndex !in currentOrder.indices) return
+
+        val item = currentOrder.removeAt(fromIndex)
+        currentOrder.add(toIndex, item)
+
+        viewModelScope.launch {
+            stitchSettingsRepository.setPriorityOrder(currentOrder)
+        }
+    }
+
+    /**
+     * Set the complete priority order.
+     */
+    fun setPriorityOrder(orderedIds: List<String>) {
+        viewModelScope.launch {
+            stitchSettingsRepository.setPriorityOrder(orderedIds)
+        }
+    }
+
+    /**
+     * Toggle send mode behavior between AUTO_PRIORITY and PROMPT_FIRST_TIME.
+     */
+    fun toggleSendModeBehavior() {
+        val currentBehavior = _uiState.value.sendModeBehavior
+        val newBehavior = when (currentBehavior) {
+            SendModeBehavior.AUTO_PRIORITY -> SendModeBehavior.PROMPT_FIRST_TIME
+            SendModeBehavior.PROMPT_FIRST_TIME -> SendModeBehavior.AUTO_PRIORITY
+        }
+        viewModelScope.launch {
+            stitchSettingsRepository.setSendModeBehavior(newBehavior)
+        }
+    }
+
+    /**
+     * Set the send mode behavior directly.
+     */
+    fun setSendModeBehavior(behavior: SendModeBehavior) {
+        viewModelScope.launch {
+            stitchSettingsRepository.setSendModeBehavior(behavior)
+        }
+    }
+
     private fun Stitch.toUiModel(): StitchUiModel = StitchUiModel(
         id = id,
         displayName = displayName,
@@ -161,6 +253,8 @@ class SeamSettingsViewModel @Inject constructor(
 data class SeamSettingsUiState(
     val stitches: ImmutableList<StitchUiModel> = persistentListOf(),
     val features: ImmutableList<FeatureUiModel> = persistentListOf(),
+    val priorityOrder: ImmutableList<String> = persistentListOf(),
+    val sendModeBehavior: SendModeBehavior = SendModeBehavior.AUTO_PRIORITY,
     val isLoading: Boolean = true
 )
 
@@ -173,7 +267,8 @@ data class StitchUiModel(
     val iconResId: Int,
     val isEnabled: Boolean,
     val connectionState: StitchConnectionState,
-    val hasSettings: Boolean
+    val hasSettings: Boolean,
+    val priorityIndex: Int = -1  // -1 means not in priority order yet
 )
 
 /**

@@ -1,782 +1,536 @@
-# Calendar Events in Chat - Implementation Plan
+# Auto-Responder Feature (Hem) Implementation Plan
 
 ## Overview
 
-Display calendar events as system-style indicators in chat conversations (like group member changes). These show what contacts with synced calendars are doing, rendered inline with messages.
+Transform the current auto-responder service into a full-fledged Feature (Hem) with rule-based configuration. Users can create multiple auto-response rules with various trigger conditions.
 
-**Format examples:**
-- "Liz now has event WFH - All Day"
-- "Liz now has event train home"
-- "Liz now has event Coffee with Jessica"
+## Clarifications Needed (Please Review)
 
-**Key requirements:**
-- Do NOT bump conversations to the top
-- Do NOT send notifications for these events
-- Background sync keeps events updated
-- Retroactive loading: On conversation open, if sync hasn't run in 48+ hours for that contact, fetch events from the last 48 hours
+Before implementation, please confirm these design decisions:
+
+1. **Rule evaluation**: Plan assumes **first matching rule wins** (user orders rules by priority in UI)
+2. **Response destination**: Plan assumes **same Stitch as incoming message** (SMS→SMS, iMessage→iMessage)
+3. **"First time from sender"**: Plan assumes **first message ever from this sender on selected Stitch(es)** since app install
+4. **Location**: Plan uses **simple address/place name with geocoding** (creates geofence internally)
 
 ---
 
-## Architecture Approach
+## Architecture
 
-### Option 1: Virtual Items (Merge at UI Layer) - **RECOMMENDED**
+### New Files to Create
 
-Calendar events are stored separately and merged with messages at display time.
+```
+app/src/main/kotlin/com/bothbubbles/
+├── seam/hems/autoresponder/
+│   ├── AutoResponderFeature.kt          # Feature interface implementation
+│   ├── AutoResponderRuleEngine.kt       # Rule evaluation logic
+│   └── AutoResponderConditionEvaluator.kt # Evaluates individual conditions
+│
+├── data/local/db/
+│   ├── entity/ (add to existing)
+│   │   └── AutoResponderRuleEntity.kt   # Rule storage entity
+│   ├── dao/ (add to existing)
+│   │   └── AutoResponderRuleDao.kt      # CRUD for rules
+│
+├── services/autoresponder/
+│   └── (modify AutoResponderService.kt) # Integrate with rule engine
+│
+├── services/context/                     # NEW - System context providers
+│   ├── DndStateProvider.kt              # Do Not Disturb state
+│   ├── CallStateProvider.kt             # Phone call state
+│   └── LocationStateProvider.kt         # Location/geofence state
+│
+├── ui/settings/autoresponder/
+│   ├── (modify existing)
+│   ├── AutoResponderRulesScreen.kt      # Rule list management
+│   ├── AutoResponderRuleEditorScreen.kt # Create/edit individual rule
+│   └── AutoResponderRuleEditorViewModel.kt
+```
 
-**Pros:**
-- Clean separation: Calendar events are not fake "messages"
-- No database migration needed for MessageEntity
-- Easier to filter/toggle calendar events
-- No risk of sync conflicts with real messages
+### Files to Modify
 
-**Cons:**
-- More complex merge logic in UI layer
-- Need to manage two data sources in message list
+1. `di/FeatureModule.kt` - Add AutoResponderFeature binding
+2. `di/DatabaseModule.kt` - Add AutoResponderRuleDao
+3. `data/local/db/BothBubblesDatabase.kt` - Add entity + dao + migration
+4. `core/data/prefs/FeaturePreferences.kt` - Already has autoResponderEnabled, may need adjustments
+5. `services/autoresponder/AutoResponderService.kt` - Integrate with rule engine
+6. `ui/settings/autoresponder/AutoResponderSettingsScreen.kt` - New rule-based UI
+7. `seam/stitches/Stitch.kt` - Add `autoResponderQuickAddExample` property
+8. `seam/stitches/bluebubbles/BlueBubblesStitch.kt` - Provide current message as example
+9. `seam/stitches/sms/SmsStitch.kt` - Optionally provide SMS example
 
-### Option 2: Store as Message-like Entities
+---
 
-Insert calendar events as special message types in the messages table.
+## Data Model
 
-**Pros:**
-- Simpler UI - just render messages
-- Automatic ordering with other messages
+### AutoResponderRuleEntity
 
-**Cons:**
-- Pollutes message table with non-messages
-- Complex deduplication logic
-- Risk of appearing in search, exports, etc.
+```kotlin
+@Entity(tableName = "auto_responder_rules")
+data class AutoResponderRuleEntity(
+    @PrimaryKey(autoGenerate = true)
+    val id: Long = 0,
 
-**Decision: Option 1** - Store calendar event occurrences in a separate table and merge at UI layer.
+    val name: String,                    // User-defined rule name
+    val message: String,                 // Response message template
+    val priority: Int,                   // Lower = higher priority (for ordering)
+    val isEnabled: Boolean = true,
+
+    // Conditions (all nullable - null means "don't check this condition")
+    val sourceStitchIds: String?,        // Comma-separated Stitch IDs (e.g., "sms,bluebubbles")
+    val firstTimeFromSender: Boolean?,   // true = only first message ever from sender
+
+    // Time-based conditions
+    val daysOfWeek: String?,             // Comma-separated: "MON,TUE,WED,THU,FRI,SAT,SUN"
+    val timeStartMinutes: Int?,          // Start time in minutes from midnight (e.g., 540 = 9:00 AM)
+    val timeEndMinutes: Int?,            // End time in minutes from midnight
+
+    // System state conditions
+    val dndModes: String?,               // Comma-separated DND modes: "PRIORITY_ONLY,ALARMS_ONLY,TOTAL_SILENCE"
+    val requireDriving: Boolean?,        // true = only when connected to Android Auto
+    val requireOnCall: Boolean?,         // true = only when on a phone call
+
+    // Location conditions
+    val locationName: String?,           // Human-readable place name
+    val locationLat: Double?,            // Latitude for geofence center
+    val locationLng: Double?,            // Longitude for geofence center
+    val locationRadiusMeters: Int?,      // Geofence radius (default 100m)
+    val locationInside: Boolean?,        // true = inside geofence, false = outside
+
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis()
+)
+```
+
+### Condition Types (Sealed Class)
+
+```kotlin
+sealed interface AutoResponderCondition {
+    data class SourceStitch(val stitchIds: Set<String>) : AutoResponderCondition
+    data object FirstTimeFromSender : AutoResponderCondition
+    data class DayOfWeek(val days: Set<DayOfWeek>) : AutoResponderCondition
+    data class TimeRange(val startMinutes: Int, val endMinutes: Int) : AutoResponderCondition
+    data class DndMode(val modes: Set<DndModeType>) : AutoResponderCondition
+    data object Driving : AutoResponderCondition
+    data object OnCall : AutoResponderCondition
+    data class Location(
+        val name: String,
+        val lat: Double,
+        val lng: Double,
+        val radiusMeters: Int,
+        val inside: Boolean
+    ) : AutoResponderCondition
+}
+
+enum class DndModeType {
+    PRIORITY_ONLY,      // INTERRUPTION_FILTER_PRIORITY
+    ALARMS_ONLY,        // INTERRUPTION_FILTER_ALARMS
+    TOTAL_SILENCE       // INTERRUPTION_FILTER_NONE
+}
+```
+
+---
+
+## Stitch Quick-Add Examples
+
+### Add to Stitch Interface
+
+```kotlin
+interface Stitch {
+    // ... existing properties ...
+
+    /**
+     * Optional quick-add example for auto-responder.
+     * Returns a pre-configured rule that users can quickly add.
+     * Return null if this Stitch doesn't have a suggested auto-response.
+     */
+    val autoResponderQuickAddExample: AutoResponderQuickAdd?
+        get() = null
+}
+
+data class AutoResponderQuickAdd(
+    val ruleName: String,
+    val description: String,
+    val message: String,
+    val defaultConditions: List<AutoResponderCondition>
+)
+```
+
+### BlueBubblesStitch Example
+
+```kotlin
+override val autoResponderQuickAddExample = AutoResponderQuickAdd(
+    ruleName = "iMessage Redirect",
+    description = "Help SMS contacts switch to iMessage",
+    message = "Hello! I use iMessage on my Android via BlueBubbles. " +
+        "Please add my iMessage address to my contact so future messages go through iMessage.",
+    defaultConditions = listOf(
+        AutoResponderCondition.SourceStitch(setOf("sms")),  // Only for SMS messages
+        AutoResponderCondition.FirstTimeFromSender          // Only first message
+    )
+)
+```
+
+**Note**: Removed auto phone number generation per user request.
+
+---
+
+## Rule Engine Logic
+
+### AutoResponderRuleEngine
+
+```kotlin
+@Singleton
+class AutoResponderRuleEngine @Inject constructor(
+    private val ruleDao: AutoResponderRuleDao,
+    private val conditionEvaluator: AutoResponderConditionEvaluator
+) {
+    /**
+     * Find the first matching rule for the given context.
+     * Rules are evaluated in priority order (lower priority number = checked first).
+     */
+    suspend fun findMatchingRule(context: MessageContext): AutoResponderRuleEntity? {
+        val enabledRules = ruleDao.getEnabledRulesByPriority()
+
+        for (rule in enabledRules) {
+            if (conditionEvaluator.allConditionsMet(rule, context)) {
+                return rule
+            }
+        }
+        return null
+    }
+}
+
+data class MessageContext(
+    val senderAddress: String,
+    val chatGuid: String,
+    val stitchId: String,
+    val isFirstFromSender: Boolean,
+    val timestamp: Long = System.currentTimeMillis()
+)
+```
+
+### AutoResponderConditionEvaluator
+
+```kotlin
+@Singleton
+class AutoResponderConditionEvaluator @Inject constructor(
+    private val dndStateProvider: DndStateProvider,
+    private val callStateProvider: CallStateProvider,
+    private val locationStateProvider: LocationStateProvider,
+    private val drivingStateTracker: DrivingStateTracker  // Existing
+) {
+    suspend fun allConditionsMet(rule: AutoResponderRuleEntity, context: MessageContext): Boolean {
+        // Source Stitch check
+        rule.sourceStitchIds?.let { ids ->
+            val allowedIds = ids.split(",").map { it.trim() }.toSet()
+            if (context.stitchId !in allowedIds) return false
+        }
+
+        // First time from sender
+        if (rule.firstTimeFromSender == true && !context.isFirstFromSender) {
+            return false
+        }
+
+        // Day of week
+        rule.daysOfWeek?.let { days ->
+            val today = LocalDate.now().dayOfWeek.name.take(3).uppercase()
+            if (today !in days.split(",")) return false
+        }
+
+        // Time range
+        if (rule.timeStartMinutes != null && rule.timeEndMinutes != null) {
+            val nowMinutes = LocalTime.now().toSecondOfDay() / 60
+            if (!isInTimeRange(nowMinutes, rule.timeStartMinutes, rule.timeEndMinutes)) {
+                return false
+            }
+        }
+
+        // DND mode
+        rule.dndModes?.let { modes ->
+            val currentDnd = dndStateProvider.getCurrentDndMode()
+            if (currentDnd?.name !in modes.split(",")) return false
+        }
+
+        // Driving (Android Auto)
+        if (rule.requireDriving == true && !drivingStateTracker.isCarConnected.value) {
+            return false
+        }
+
+        // On a call
+        if (rule.requireOnCall == true && !callStateProvider.isOnCall()) {
+            return false
+        }
+
+        // Location
+        if (rule.locationLat != null && rule.locationLng != null) {
+            val isInside = locationStateProvider.isInsideGeofence(
+                rule.locationLat, rule.locationLng, rule.locationRadiusMeters ?: 100
+            )
+            if (rule.locationInside == true && !isInside) return false
+            if (rule.locationInside == false && isInside) return false
+        }
+
+        return true
+    }
+}
+```
+
+---
+
+## System Context Providers
+
+### DndStateProvider
+
+```kotlin
+@Singleton
+class DndStateProvider @Inject constructor(
+    @ApplicationContext private val context: Context
+) {
+    private val notificationManager = context.getSystemService(NotificationManager::class.java)
+
+    fun getCurrentDndMode(): DndModeType? {
+        return when (notificationManager.currentInterruptionFilter) {
+            NotificationManager.INTERRUPTION_FILTER_PRIORITY -> DndModeType.PRIORITY_ONLY
+            NotificationManager.INTERRUPTION_FILTER_ALARMS -> DndModeType.ALARMS_ONLY
+            NotificationManager.INTERRUPTION_FILTER_NONE -> DndModeType.TOTAL_SILENCE
+            else -> null  // INTERRUPTION_FILTER_ALL = DND is off
+        }
+    }
+}
+```
+
+### CallStateProvider
+
+```kotlin
+@Singleton
+class CallStateProvider @Inject constructor(
+    @ApplicationContext private val context: Context
+) {
+    private val telephonyManager = context.getSystemService(TelephonyManager::class.java)
+
+    @SuppressLint("MissingPermission")
+    fun isOnCall(): Boolean {
+        // Requires READ_PHONE_STATE permission
+        return telephonyManager.callState != TelephonyManager.CALL_STATE_IDLE
+    }
+}
+```
+
+### LocationStateProvider
+
+```kotlin
+@Singleton
+class LocationStateProvider @Inject constructor(
+    @ApplicationContext private val context: Context,
+    @ApplicationScope private val scope: CoroutineScope
+) {
+    private val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
+
+    @SuppressLint("MissingPermission")
+    suspend fun isInsideGeofence(lat: Double, lng: Double, radiusMeters: Int): Boolean {
+        // Get last known location and check distance
+        return suspendCancellableCoroutine { cont ->
+            fusedLocationClient.lastLocation
+                .addOnSuccessListener { location ->
+                    if (location == null) {
+                        cont.resume(false)
+                    } else {
+                        val results = FloatArray(1)
+                        Location.distanceBetween(
+                            location.latitude, location.longitude,
+                            lat, lng, results
+                        )
+                        cont.resume(results[0] <= radiusMeters)
+                    }
+                }
+                .addOnFailureListener {
+                    cont.resume(false)
+                }
+        }
+    }
+}
+```
+
+---
+
+## UI Design
+
+### Main Auto-Responder Settings Screen
+
+```
+┌────────────────────────────────────────┐
+│ ← Auto-Responder                       │
+├────────────────────────────────────────┤
+│ ┌────────────────────────────────────┐ │
+│ │ 🤖 Automated Responses             │ │
+│ │ Send automatic replies based on    │ │
+│ │ customizable rules and conditions  │ │
+│ └────────────────────────────────────┘ │
+│                                        │
+│ [============================] ON      │
+│                                        │
+│ ─────────────────────────────────────  │
+│ YOUR RULES                             │
+│ ─────────────────────────────────────  │
+│ ┌─ iMessage Redirect ────────────┐    │
+│ │ SMS · First time only     [ON] │ ⋮  │
+│ └────────────────────────────────┘    │
+│ ┌─ Driving Response ─────────────┐    │
+│ │ Android Auto              [ON] │ ⋮  │
+│ └────────────────────────────────┘    │
+│ ┌─ Night Mode ───────────────────┐    │
+│ │ 10PM - 7AM · DND         [OFF] │ ⋮  │
+│ └────────────────────────────────┘    │
+│                                        │
+│           [+ Add Rule]                 │
+│                                        │
+│ ─────────────────────────────────────  │
+│ QUICK ADD                              │
+│ ─────────────────────────────────────  │
+│ ┌─ iMessage ─────────────────────┐    │
+│ │ 💬 iMessage Redirect           │    │
+│ │ Help SMS contacts switch...    │ +  │
+│ └────────────────────────────────┘    │
+│                                        │
+│ ─────────────────────────────────────  │
+│ RATE LIMIT                             │
+│ Maximum 10 auto-responses per hour     │
+│ ═══════════○═══════════════════════    │
+└────────────────────────────────────────┘
+```
+
+### Rule Editor Screen
+
+```
+┌────────────────────────────────────────┐
+│ ← Edit Rule                     [Save] │
+├────────────────────────────────────────┤
+│ Rule Name                              │
+│ ┌────────────────────────────────────┐ │
+│ │ iMessage Redirect                  │ │
+│ └────────────────────────────────────┘ │
+│                                        │
+│ Message                                │
+│ ┌────────────────────────────────────┐ │
+│ │ Hello! I use iMessage on my        │ │
+│ │ Android via BlueBubbles...         │ │
+│ └────────────────────────────────────┘ │
+│                                        │
+│ ─────────────────────────────────────  │
+│ CONDITIONS                             │
+│ ─────────────────────────────────────  │
+│                                        │
+│ Message Source                         │
+│ ┌──────┐ ┌──────────┐                 │
+│ │ SMS ✓│ │ iMessage │                 │
+│ └──────┘ └──────────┘                 │
+│                                        │
+│ First time from sender          [ON]   │
+│                                        │
+│ ─────────────────────────────────────  │
+│ ▸ Time & Day Conditions                │
+│ ▸ System State Conditions              │
+│ ▸ Location Conditions                  │
+│                                        │
+└────────────────────────────────────────┘
+```
 
 ---
 
 ## Implementation Steps
 
-### Phase 1: Database Layer
+### Phase 1: Core Infrastructure (Database + Feature)
+1. Create `AutoResponderRuleEntity` and migration
+2. Create `AutoResponderRuleDao`
+3. Create `AutoResponderFeature` implementing Feature interface
+4. Add binding in `FeatureModule.kt`
+5. Create system context providers (DndStateProvider, CallStateProvider, LocationStateProvider)
 
-#### 1.1 Create CalendarEventOccurrenceEntity
+### Phase 2: Rule Engine
+6. Create `AutoResponderConditionEvaluator`
+7. Create `AutoResponderRuleEngine`
+8. Modify `AutoResponderService` to use rule engine
 
-New entity to track calendar events that have been "logged" into a chat:
+### Phase 3: Stitch Integration
+9. Add `autoResponderQuickAddExample` to `Stitch` interface
+10. Implement in `BlueBubblesStitch` (current message without phone number)
+11. Optionally implement in `SmsStitch`
 
-```kotlin
-// core/model/src/main/kotlin/com/bothbubbles/core/model/entity/CalendarEventOccurrenceEntity.kt
+### Phase 4: UI
+12. Create `AutoResponderRulesScreen` (list view)
+13. Create `AutoResponderRuleEditorScreen` + ViewModel
+14. Modify existing `AutoResponderSettingsScreen` to use new screens
+15. Add navigation routes
 
-@Entity(
-    tableName = "calendar_event_occurrences",
-    indices = [
-        Index(value = ["chat_address"]),
-        Index(value = ["event_start_time"]),
-        Index(value = ["chat_address", "event_id", "event_start_time"], unique = true)
-    ]
-)
-data class CalendarEventOccurrenceEntity(
-    @PrimaryKey(autoGenerate = true)
-    val id: Long = 0,
+### Phase 5: Testing & Polish
+16. Unit tests for condition evaluator
+17. Integration tests for rule engine
+18. UI tests for rule editor
+19. Permission handling for location/phone state
 
-    // The normalized address this event belongs to (for lookup)
-    @ColumnInfo(name = "chat_address")
-    val chatAddress: String,
+---
 
-    // Calendar event details
-    @ColumnInfo(name = "event_id")
-    val eventId: Long,
+## Permissions Required
 
-    @ColumnInfo(name = "event_title")
-    val eventTitle: String,
+```xml
+<!-- For DND state -->
+<uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
 
-    @ColumnInfo(name = "event_start_time")
-    val eventStartTime: Long,
+<!-- For call state -->
+<uses-permission android:name="android.permission.READ_PHONE_STATE" />
 
-    @ColumnInfo(name = "event_end_time")
-    val eventEndTime: Long,
-
-    @ColumnInfo(name = "is_all_day")
-    val isAllDay: Boolean,
-
-    // Display name of the contact (cached for rendering)
-    @ColumnInfo(name = "contact_display_name")
-    val contactDisplayName: String,
-
-    // When this occurrence was recorded
-    @ColumnInfo(name = "created_at")
-    val createdAt: Long = System.currentTimeMillis()
-)
+<!-- For location (if using location conditions) -->
+<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+<uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
 ```
 
-#### 1.2 Create CalendarEventOccurrenceDao
+---
+
+## Database Migration
 
 ```kotlin
-// app/src/main/kotlin/com/bothbubbles/data/local/db/dao/CalendarEventOccurrenceDao.kt
-
-@Dao
-interface CalendarEventOccurrenceDao {
-
-    // Get events for a chat, ordered by start time (for display)
-    @Query("""
-        SELECT * FROM calendar_event_occurrences
-        WHERE chat_address = :address
-        ORDER BY event_start_time DESC
-    """)
-    fun observeForAddress(address: String): Flow<List<CalendarEventOccurrenceEntity>>
-
-    // Get events within a time range for a chat
-    @Query("""
-        SELECT * FROM calendar_event_occurrences
-        WHERE chat_address = :address
-        AND event_start_time >= :startTime
-        AND event_start_time <= :endTime
-        ORDER BY event_start_time DESC
-    """)
-    suspend fun getForAddressInRange(
-        address: String,
-        startTime: Long,
-        endTime: Long
-    ): List<CalendarEventOccurrenceEntity>
-
-    // Check if event already exists (for deduplication)
-    @Query("""
-        SELECT EXISTS(
-            SELECT 1 FROM calendar_event_occurrences
-            WHERE chat_address = :address
-            AND event_id = :eventId
-            AND event_start_time = :startTime
-        )
-    """)
-    suspend fun exists(address: String, eventId: Long, startTime: Long): Boolean
-
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
-    suspend fun insert(occurrence: CalendarEventOccurrenceEntity)
-
-    @Insert(onConflict = OnConflictStrategy.IGNORE)
-    suspend fun insertAll(occurrences: List<CalendarEventOccurrenceEntity>)
-
-    // Clean up old events (older than X days)
-    @Query("DELETE FROM calendar_event_occurrences WHERE event_start_time < :cutoffTime")
-    suspend fun deleteOlderThan(cutoffTime: Long)
-}
-```
-
-#### 1.3 Database Migration
-
-Add migration to `DatabaseMigrations.kt`:
-
-```kotlin
-val MIGRATION_62_63 = object : Migration(62, 63) {
-    override fun migrate(database: SupportSQLiteDatabase) {
-        database.execSQL("""
-            CREATE TABLE IF NOT EXISTS calendar_event_occurrences (
+val MIGRATION_X_Y = object : Migration(X, Y) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS auto_responder_rules (
                 id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-                chat_address TEXT NOT NULL,
-                event_id INTEGER NOT NULL,
-                event_title TEXT NOT NULL,
-                event_start_time INTEGER NOT NULL,
-                event_end_time INTEGER NOT NULL,
-                is_all_day INTEGER NOT NULL DEFAULT 0,
-                contact_display_name TEXT NOT NULL,
-                created_at INTEGER NOT NULL DEFAULT 0
+                name TEXT NOT NULL,
+                message TEXT NOT NULL,
+                priority INTEGER NOT NULL,
+                isEnabled INTEGER NOT NULL DEFAULT 1,
+                sourceStitchIds TEXT,
+                firstTimeFromSender INTEGER,
+                daysOfWeek TEXT,
+                timeStartMinutes INTEGER,
+                timeEndMinutes INTEGER,
+                dndModes TEXT,
+                requireDriving INTEGER,
+                requireOnCall INTEGER,
+                locationName TEXT,
+                locationLat REAL,
+                locationLng REAL,
+                locationRadiusMeters INTEGER,
+                locationInside INTEGER,
+                createdAt INTEGER NOT NULL,
+                updatedAt INTEGER NOT NULL
             )
         """)
-        database.execSQL("""
-            CREATE INDEX IF NOT EXISTS index_calendar_event_occurrences_chat_address
-            ON calendar_event_occurrences (chat_address)
-        """)
-        database.execSQL("""
-            CREATE INDEX IF NOT EXISTS index_calendar_event_occurrences_event_start_time
-            ON calendar_event_occurrences (event_start_time)
-        """)
-        database.execSQL("""
-            CREATE UNIQUE INDEX IF NOT EXISTS index_calendar_event_occurrences_unique
-            ON calendar_event_occurrences (chat_address, event_id, event_start_time)
-        """)
     }
 }
 ```
 
 ---
 
-### Phase 2: Repository Layer
+## Notes
 
-#### 2.1 Create CalendarEventOccurrenceRepository
+1. **Backwards compatibility**: Existing auto-responder preference (`autoResponderEnabled`) will control the Feature's enabled state. Existing settings (filter, rate limit, alias) can be migrated to a default rule on first launch.
 
-```kotlin
-// app/src/main/kotlin/com/bothbubbles/data/repository/CalendarEventOccurrenceRepository.kt
+2. **Rate limiting**: Keep the existing rate limit logic but apply it across ALL rules combined (not per-rule).
 
-@Singleton
-class CalendarEventOccurrenceRepository @Inject constructor(
-    private val dao: CalendarEventOccurrenceDao,
-    private val calendarProvider: CalendarContentProvider,
-    private val calendarAssociationDao: ContactCalendarDao,
-    private val handleDao: HandleDao
-) {
-    companion object {
-        private const val TAG = "CalendarEventOccRepo"
-        private const val RETROACTIVE_WINDOW_HOURS = 48
-        private const val CLEANUP_DAYS = 7
-    }
+3. **"Responded to sender" tracking**: The existing `AutoRespondedSenderDao` continues to work, but now tracks per-rule responses (need to add `ruleId` column).
 
-    /**
-     * Observe calendar event occurrences for a chat address.
-     */
-    fun observeForAddress(address: String): Flow<List<CalendarEventOccurrenceEntity>> =
-        dao.observeForAddress(address)
+4. **DrivingStateTracker**: Already exists and can be reused directly.
 
-    /**
-     * Sync calendar events for a contact (background sync).
-     * Fetches events from now to +24 hours and records occurrences.
-     */
-    suspend fun syncEventsForContact(address: String): Result<Int> = runCatching {
-        val association = calendarAssociationDao.getByAddress(address) ?: return@runCatching 0
-        val displayName = handleDao.getDisplayNameForAddress(address) ?: address.take(10)
-
-        val now = System.currentTimeMillis()
-        val events = calendarProvider.getUpcomingEvents(association.calendarId, windowHours = 24)
-
-        var insertedCount = 0
-        for (event in events) {
-            if (!dao.exists(address, event.id, event.startTime)) {
-                dao.insert(
-                    CalendarEventOccurrenceEntity(
-                        chatAddress = address,
-                        eventId = event.id,
-                        eventTitle = event.title,
-                        eventStartTime = event.startTime,
-                        eventEndTime = event.endTime,
-                        isAllDay = event.isAllDay,
-                        contactDisplayName = displayName
-                    )
-                )
-                insertedCount++
-            }
-        }
-
-        Timber.tag(TAG).d("Synced $insertedCount new events for $address")
-        insertedCount
-    }
-
-    /**
-     * Retroactively fetch events for the past 48 hours.
-     * Called when opening a conversation if sync hasn't run recently.
-     */
-    suspend fun retroactiveSyncForContact(address: String): Result<Int> = runCatching {
-        val association = calendarAssociationDao.getByAddress(address) ?: return@runCatching 0
-        val displayName = handleDao.getDisplayNameForAddress(address) ?: address.take(10)
-
-        val now = System.currentTimeMillis()
-        val windowStart = now - (RETROACTIVE_WINDOW_HOURS * 60 * 60 * 1000L)
-
-        // Query past events using Instances API
-        val events = calendarProvider.getEventsInRange(
-            calendarId = association.calendarId,
-            startTime = windowStart,
-            endTime = now
-        )
-
-        var insertedCount = 0
-        for (event in events) {
-            if (!dao.exists(address, event.id, event.startTime)) {
-                dao.insert(
-                    CalendarEventOccurrenceEntity(
-                        chatAddress = address,
-                        eventId = event.id,
-                        eventTitle = event.title,
-                        eventStartTime = event.startTime,
-                        eventEndTime = event.endTime,
-                        isAllDay = event.isAllDay,
-                        contactDisplayName = displayName
-                    )
-                )
-                insertedCount++
-            }
-        }
-
-        Timber.tag(TAG).d("Retroactively synced $insertedCount events for $address")
-        insertedCount
-    }
-
-    /**
-     * Clean up old event occurrences.
-     */
-    suspend fun cleanupOldEvents() {
-        val cutoff = System.currentTimeMillis() - (CLEANUP_DAYS * 24 * 60 * 60 * 1000L)
-        dao.deleteOlderThan(cutoff)
-    }
-}
-```
-
-#### 2.2 Add getEventsInRange to CalendarContentProvider
-
-```kotlin
-// Add to CalendarContentProvider.kt
-
-/**
- * Get events within a specific time range (for retroactive sync).
- */
-suspend fun getEventsInRange(
-    calendarId: Long,
-    startTime: Long,
-    endTime: Long
-): List<CalendarEvent> = withContext(Dispatchers.IO) {
-    if (!permissionStateMonitor.hasCalendarPermission()) {
-        return@withContext emptyList()
-    }
-
-    val events = mutableListOf<CalendarEvent>()
-
-    try {
-        val instancesUri = CalendarContract.Instances.CONTENT_URI.buildUpon()
-            .appendPath(startTime.toString())
-            .appendPath(endTime.toString())
-            .build()
-
-        contentResolver.query(
-            instancesUri,
-            arrayOf(
-                CalendarContract.Instances.EVENT_ID,
-                CalendarContract.Instances.TITLE,
-                CalendarContract.Instances.BEGIN,
-                CalendarContract.Instances.END,
-                CalendarContract.Instances.ALL_DAY,
-                CalendarContract.Instances.EVENT_LOCATION,
-                CalendarContract.Instances.CALENDAR_COLOR
-            ),
-            "${CalendarContract.Instances.CALENDAR_ID} = ?",
-            arrayOf(calendarId.toString()),
-            "${CalendarContract.Instances.BEGIN} ASC"
-        )?.use { cursor ->
-            while (cursor.moveToNext()) {
-                events.add(
-                    CalendarEvent(
-                        id = cursor.getLong(0),
-                        title = cursor.getString(1) ?: "No title",
-                        startTime = cursor.getLong(2),
-                        endTime = cursor.getLong(3),
-                        isAllDay = cursor.getInt(4) == 1,
-                        location = cursor.getString(5),
-                        color = cursor.getInt(6).takeIf { !cursor.isNull(6) }
-                    )
-                )
-            }
-        }
-    } catch (e: Exception) {
-        Timber.tag(TAG).e(e, "Failed to query events in range for calendar $calendarId")
-    }
-
-    events
-}
-```
-
----
-
-### Phase 3: Background Sync Worker
-
-#### 3.1 Create CalendarEventSyncWorker
-
-```kotlin
-// app/src/main/kotlin/com/bothbubbles/services/calendar/CalendarEventSyncWorker.kt
-
-@HiltWorker
-class CalendarEventSyncWorker @AssistedInject constructor(
-    @Assisted context: Context,
-    @Assisted workerParams: WorkerParameters,
-    private val calendarEventOccurrenceRepository: CalendarEventOccurrenceRepository,
-    private val contactCalendarDao: ContactCalendarDao,
-    private val syncPreferences: CalendarEventSyncPreferences
-) : CoroutineWorker(context, workerParams) {
-
-    companion object {
-        private const val TAG = "CalendarEventSyncWorker"
-        private const val WORK_NAME = "calendar_event_sync"
-
-        fun schedule(context: Context, intervalMinutes: Int = 30) {
-            val constraints = Constraints.Builder()
-                .setRequiresBatteryNotLow(true)
-                .build()
-
-            val workRequest = PeriodicWorkRequestBuilder<CalendarEventSyncWorker>(
-                intervalMinutes.toLong().coerceAtLeast(15),
-                TimeUnit.MINUTES
-            )
-                .setConstraints(constraints)
-                .setBackoffCriteria(
-                    BackoffPolicy.EXPONENTIAL,
-                    15, TimeUnit.MINUTES
-                )
-                .addTag(WORK_NAME)
-                .build()
-
-            WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-                WORK_NAME,
-                ExistingPeriodicWorkPolicy.KEEP,
-                workRequest
-            )
-
-            Timber.tag(TAG).d("Scheduled calendar event sync every $intervalMinutes minutes")
-        }
-
-        fun cancel(context: Context) {
-            WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
-            Timber.tag(TAG).d("Cancelled calendar event sync worker")
-        }
-    }
-
-    override suspend fun doWork(): Result {
-        Timber.tag(TAG).d("Starting calendar event sync")
-
-        return try {
-            // Get all contacts with calendar associations
-            val associations = contactCalendarDao.getAll()
-
-            if (associations.isEmpty()) {
-                Timber.tag(TAG).d("No calendar associations, skipping sync")
-                return Result.success()
-            }
-
-            var totalSynced = 0
-            for (association in associations) {
-                val result = calendarEventOccurrenceRepository.syncEventsForContact(
-                    association.linkedAddress
-                )
-                result.onSuccess { count ->
-                    totalSynced += count
-                    // Record last sync time
-                    syncPreferences.setLastSyncTime(association.linkedAddress)
-                }
-            }
-
-            // Cleanup old events
-            calendarEventOccurrenceRepository.cleanupOldEvents()
-
-            Timber.tag(TAG).d("Calendar event sync complete: $totalSynced new events")
-            Result.success()
-        } catch (e: Exception) {
-            Timber.tag(TAG).e(e, "Calendar event sync failed")
-            Result.retry()
-        }
-    }
-}
-```
-
-#### 3.2 Create CalendarEventSyncPreferences
-
-```kotlin
-// app/src/main/kotlin/com/bothbubbles/services/calendar/CalendarEventSyncPreferences.kt
-
-@Singleton
-class CalendarEventSyncPreferences @Inject constructor(
-    @ApplicationContext private val context: Context
-) {
-    private val prefs = context.getSharedPreferences("calendar_event_sync", Context.MODE_PRIVATE)
-
-    companion object {
-        private const val KEY_PREFIX_LAST_SYNC = "last_sync_"
-        const val STALE_THRESHOLD_MS = 48 * 60 * 60 * 1000L // 48 hours
-    }
-
-    fun getLastSyncTime(address: String): Long {
-        return prefs.getLong(KEY_PREFIX_LAST_SYNC + address, 0L)
-    }
-
-    fun setLastSyncTime(address: String, time: Long = System.currentTimeMillis()) {
-        prefs.edit().putLong(KEY_PREFIX_LAST_SYNC + address, time).apply()
-    }
-
-    fun needsRetroactiveSync(address: String): Boolean {
-        val lastSync = getLastSyncTime(address)
-        if (lastSync == 0L) return true
-        return (System.currentTimeMillis() - lastSync) >= STALE_THRESHOLD_MS
-    }
-}
-```
-
----
-
-### Phase 4: UI Integration
-
-#### 4.1 Create CalendarEventItem Model
-
-```kotlin
-// app/src/main/kotlin/com/bothbubbles/ui/components/message/CalendarEventItem.kt
-
-/**
- * UI model for a calendar event occurrence displayed in chat.
- */
-data class CalendarEventItem(
-    val id: Long,
-    val contactName: String,
-    val eventTitle: String,
-    val eventStartTime: Long,
-    val isAllDay: Boolean
-) {
-    /**
-     * Formatted display text: "Liz now has event WFH - All Day"
-     */
-    val displayText: String
-        get() {
-            val firstName = contactName.split(" ").firstOrNull() ?: contactName
-            val suffix = if (isAllDay) " - All Day" else ""
-            return "$firstName now has event $eventTitle$suffix"
-        }
-}
-```
-
-#### 4.2 Create CalendarEventIndicator Composable
-
-```kotlin
-// app/src/main/kotlin/com/bothbubbles/ui/components/message/CalendarEventIndicator.kt
-
-/**
- * Calendar event indicator - styled like GroupEventIndicator but with calendar icon.
- */
-@Composable
-fun CalendarEventIndicator(
-    text: String,
-    modifier: Modifier = Modifier
-) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(vertical = 8.dp),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            imageVector = Icons.Outlined.Event,
-            contentDescription = null,
-            modifier = Modifier.size(14.dp),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-        )
-        Spacer(modifier = Modifier.width(6.dp))
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-        )
-    }
-}
-```
-
-#### 4.3 Create ChatTimelineItem Sealed Class
-
-Unify messages and calendar events into a single timeline:
-
-```kotlin
-// app/src/main/kotlin/com/bothbubbles/ui/chat/ChatTimelineItem.kt
-
-/**
- * Represents an item in the chat timeline - either a message or a calendar event.
- */
-sealed class ChatTimelineItem {
-    abstract val timestamp: Long
-    abstract val key: String
-
-    data class Message(val message: MessageUiModel) : ChatTimelineItem() {
-        override val timestamp: Long = message.dateCreated
-        override val key: String = message.guid
-    }
-
-    data class CalendarEvent(val event: CalendarEventItem) : ChatTimelineItem() {
-        override val timestamp: Long = event.eventStartTime
-        override val key: String = "cal_${event.id}"
-    }
-}
-```
-
-#### 4.4 Merge Logic in ChatViewModel/Delegate
-
-Create a delegate or add to existing delegate to merge calendar events:
-
-```kotlin
-// In CursorChatMessageListDelegate or new CalendarEventDelegate
-
-/**
- * Merge messages and calendar events into a single timeline.
- * Calendar events are interleaved based on their start time.
- */
-fun mergeTimeline(
-    messages: List<MessageUiModel>,
-    calendarEvents: List<CalendarEventItem>
-): List<ChatTimelineItem> {
-    if (calendarEvents.isEmpty()) {
-        return messages.map { ChatTimelineItem.Message(it) }
-    }
-
-    val timeline = mutableListOf<ChatTimelineItem>()
-    val messageIterator = messages.iterator()
-    val eventIterator = calendarEvents.sortedByDescending { it.eventStartTime }.iterator()
-
-    var currentMessage = if (messageIterator.hasNext()) messageIterator.next() else null
-    var currentEvent = if (eventIterator.hasNext()) eventIterator.next() else null
-
-    while (currentMessage != null || currentEvent != null) {
-        when {
-            currentMessage == null -> {
-                timeline.add(ChatTimelineItem.CalendarEvent(currentEvent!!))
-                currentEvent = if (eventIterator.hasNext()) eventIterator.next() else null
-            }
-            currentEvent == null -> {
-                timeline.add(ChatTimelineItem.Message(currentMessage))
-                currentMessage = if (messageIterator.hasNext()) messageIterator.next() else null
-            }
-            currentMessage.dateCreated >= currentEvent.eventStartTime -> {
-                timeline.add(ChatTimelineItem.Message(currentMessage))
-                currentMessage = if (messageIterator.hasNext()) messageIterator.next() else null
-            }
-            else -> {
-                timeline.add(ChatTimelineItem.CalendarEvent(currentEvent))
-                currentEvent = if (eventIterator.hasNext()) eventIterator.next() else null
-            }
-        }
-    }
-
-    return timeline
-}
-```
-
-#### 4.5 Retroactive Sync on Conversation Open
-
-Add to ChatViewModel initialization:
-
-```kotlin
-// In ChatViewModel.init or ChatSyncDelegate
-
-private fun checkAndPerformRetroactiveSync(address: String) {
-    viewModelScope.launch {
-        val association = contactCalendarRepository.getAssociation(address)
-        if (association != null && calendarEventSyncPreferences.needsRetroactiveSync(address)) {
-            Timber.d("Performing retroactive calendar sync for $address")
-            calendarEventOccurrenceRepository.retroactiveSyncForContact(address)
-            calendarEventSyncPreferences.setLastSyncTime(address)
-        }
-    }
-}
-```
-
-#### 4.6 Update ChatMessageList to Handle Timeline Items
-
-Modify the LazyColumn to render both message and calendar event items:
-
-```kotlin
-// In ChatMessageList.kt - update itemsIndexed block
-
-itemsIndexed(
-    items = timelineItems,  // Changed from messages
-    key = { _, item -> item.key },
-    contentType = { _, item ->
-        when (item) {
-            is ChatTimelineItem.CalendarEvent -> ContentType.CALENDAR_EVENT
-            is ChatTimelineItem.Message -> {
-                // Existing message content type logic
-            }
-        }
-    }
-) { index, item ->
-    when (item) {
-        is ChatTimelineItem.CalendarEvent -> {
-            CalendarEventIndicator(text = item.event.displayText)
-        }
-        is ChatTimelineItem.Message -> {
-            // Existing MessageListItem code
-            MessageListItem(message = item.message, ...)
-        }
-    }
-}
-```
-
----
-
-### Phase 5: Schedule Worker on App Start
-
-#### 5.1 Initialize Worker in BothBubblesApp
-
-```kotlin
-// In BothBubblesApp.kt - initializeBackgroundSync() or similar
-
-private fun initializeCalendarEventSync() {
-    // Only schedule if there are any calendar associations
-    applicationScope.launch {
-        val hasAssociations = contactCalendarDao.hasAnyAssociations()
-        if (hasAssociations) {
-            CalendarEventSyncWorker.schedule(this@BothBubblesApp, intervalMinutes = 30)
-        }
-    }
-}
-```
-
-#### 5.2 Start/Stop Worker When Associations Change
-
-```kotlin
-// In ContactCalendarRepository
-
-suspend fun setAssociation(...) {
-    // ... existing code ...
-
-    // Start worker if this is the first association
-    val count = dao.getAssociationCount()
-    if (count == 1) {
-        CalendarEventSyncWorker.schedule(context, intervalMinutes = 30)
-    }
-}
-
-suspend fun removeAssociation(address: String) {
-    // ... existing code ...
-
-    // Stop worker if no more associations
-    val count = dao.getAssociationCount()
-    if (count == 0) {
-        CalendarEventSyncWorker.cancel(context)
-    }
-}
-```
-
----
-
-## Files to Create/Modify
-
-### New Files
-1. `core/model/src/main/kotlin/com/bothbubbles/core/model/entity/CalendarEventOccurrenceEntity.kt`
-2. `app/src/main/kotlin/com/bothbubbles/data/local/db/dao/CalendarEventOccurrenceDao.kt`
-3. `app/src/main/kotlin/com/bothbubbles/data/repository/CalendarEventOccurrenceRepository.kt`
-4. `app/src/main/kotlin/com/bothbubbles/services/calendar/CalendarEventSyncWorker.kt`
-5. `app/src/main/kotlin/com/bothbubbles/services/calendar/CalendarEventSyncPreferences.kt`
-6. `app/src/main/kotlin/com/bothbubbles/ui/components/message/CalendarEventIndicator.kt`
-7. `app/src/main/kotlin/com/bothbubbles/ui/chat/ChatTimelineItem.kt`
-8. `app/schemas/com.bothbubbles.data.local.db.BothBubblesDatabase/63.json`
-
-### Modified Files
-1. `app/src/main/kotlin/com/bothbubbles/data/local/db/BothBubblesDatabase.kt` - Add entity and DAO
-2. `app/src/main/kotlin/com/bothbubbles/data/local/db/DatabaseMigrations.kt` - Add migration
-3. `app/src/main/kotlin/com/bothbubbles/services/calendar/CalendarContentProvider.kt` - Add getEventsInRange
-4. `app/src/main/kotlin/com/bothbubbles/di/DatabaseModule.kt` - Provide new DAO
-5. `app/src/main/kotlin/com/bothbubbles/ui/chat/ChatMessageList.kt` - Handle timeline items
-6. `app/src/main/kotlin/com/bothbubbles/ui/chat/ChatViewModel.kt` - Retroactive sync on open
-7. `app/src/main/kotlin/com/bothbubbles/ui/chat/delegates/CursorChatMessageListDelegate.kt` - Merge logic
-8. `app/src/main/kotlin/com/bothbubbles/BothBubblesApp.kt` - Initialize worker
-
----
-
-## Testing Considerations
-
-1. **Unit Tests**
-   - CalendarEventOccurrenceRepository merge logic
-   - Retroactive sync time calculations
-   - Display text formatting
-
-2. **Integration Tests**
-   - Background worker scheduling/cancellation
-   - Database migration
-
-3. **Manual Testing**
-   - Verify events appear at correct timeline positions
-   - Verify no notifications triggered
-   - Verify conversations don't bump to top
-   - Test retroactive loading on conversation open
-   - Test with all-day vs timed events
-
----
-
-## Open Questions
-
-1. Should calendar events have an icon? (Proposed: yes, small calendar icon)
-2. Should there be a setting to disable calendar event display per-contact?
-3. Should calendar events be filterable/hideable globally?
-4. How to handle recurring events that span multiple days?
+5. **Quick-add examples**: Only shown for enabled Stitches that provide them. User can tap to instantly create a pre-configured rule.

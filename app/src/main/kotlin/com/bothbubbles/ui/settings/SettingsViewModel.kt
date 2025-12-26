@@ -8,6 +8,8 @@ import com.bothbubbles.core.data.ConnectionState
 import com.bothbubbles.core.network.api.BothBubblesApi
 import com.bothbubbles.core.network.api.dto.FindMyDeviceDto
 import com.bothbubbles.core.network.api.dto.FindMyFriendDto
+import com.bothbubbles.seam.settings.SettingsContributionProvider
+import com.bothbubbles.seam.settings.SettingsSection
 import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.services.sound.SoundPlayer
 import com.bothbubbles.services.sound.SoundTheme
@@ -34,8 +36,16 @@ class SettingsViewModel @Inject constructor(
     private val soundPlayer: SoundPlayer,
     private val smsPermissionHelper: SmsPermissionHelper,
     private val permissionStateMonitor: PermissionStateMonitor,
-    private val api: BothBubblesApi
+    private val api: BothBubblesApi,
+    val settingsContributionProvider: SettingsContributionProvider
 ) : ViewModel() {
+
+    /**
+     * Get menu items contributed by Stitches and Features for a specific section.
+     * Use this to dynamically render settings items in each section.
+     */
+    fun getMenuItemsForSection(section: SettingsSection) =
+        settingsContributionProvider.getMenuItemsForSection(section)
 
     private val _uiState = MutableStateFlow(SettingsUiState())
     val uiState: StateFlow<SettingsUiState> = _uiState.asStateFlow()

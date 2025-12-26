@@ -126,6 +126,19 @@ sealed interface Screen {
     @Serializable
     data class AutoResponderSettings(val returnToSettings: Boolean = false) : Screen
 
+    /**
+     * Auto-responder rules list screen (new rule-based system)
+     */
+    @Serializable
+    data class AutoResponderRules(val returnToSettings: Boolean = false) : Screen
+
+    /**
+     * Auto-responder rule editor screen
+     * @param ruleId The rule ID to edit, or -1 to create a new rule
+     */
+    @Serializable
+    data class AutoResponderRuleEditor(val ruleId: Long = -1) : Screen
+
     @Serializable
     data class EtaSharingSettings(val returnToSettings: Boolean = false) : Screen
 
@@ -177,4 +190,10 @@ sealed interface Screen {
      */
     @Serializable
     data class Life360Map(val participantAddress: String) : Screen
+
+    /**
+     * Seam settings - manage Stitches (messaging platforms) and Features (enhancements).
+     */
+    @Serializable
+    data class SeamSettings(val returnToSettings: Boolean = false) : Screen
 }

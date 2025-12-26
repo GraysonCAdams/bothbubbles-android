@@ -6,7 +6,6 @@ import androidx.lifecycle.viewModelScope
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.core.network.api.BothBubblesApi
 import com.bothbubbles.data.repository.SmsRepository
-import com.bothbubbles.services.autoresponder.AutoResponderService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -16,6 +15,10 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+/**
+ * @deprecated This ViewModel is deprecated. Use AutoResponderRulesViewModel instead.
+ * The rule-based auto-responder system replaces the old filter-based approach.
+ */
 data class AutoResponderSettingsUiState(
     val enabled: Boolean = false,
     val filterMode: String = "known_senders",
@@ -27,11 +30,15 @@ data class AutoResponderSettingsUiState(
     val isLoadingAliases: Boolean = false
 )
 
+/**
+ * @deprecated This ViewModel is deprecated. Use AutoResponderRulesViewModel instead.
+ * The rule-based auto-responder system replaces the old filter-based approach.
+ */
+@Deprecated("Use AutoResponderRulesViewModel instead")
 @HiltViewModel
 class AutoResponderSettingsViewModel @Inject constructor(
     private val settingsDataStore: SettingsDataStore,
     private val smsRepository: SmsRepository,
-    private val autoResponderService: AutoResponderService,
     private val api: BothBubblesApi
 ) : ViewModel() {
 
@@ -61,7 +68,7 @@ class AutoResponderSettingsViewModel @Inject constructor(
             filterMode = filter,
             rateLimit = rateLimit,
             phoneNumber = phoneNumber,
-            messagePreview = autoResponderService.buildMessage(selectedAlias.takeIf { it.isNotBlank() }),
+            messagePreview = "(See rules for message preview)",
             availableAliases = aliases,
             selectedAlias = selectedAlias,
             isLoadingAliases = isLoading
@@ -70,7 +77,7 @@ class AutoResponderSettingsViewModel @Inject constructor(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = AutoResponderSettingsUiState(
-            messagePreview = autoResponderService.buildMessage(null)
+            messagePreview = "(See rules for message preview)"
         )
     )
 

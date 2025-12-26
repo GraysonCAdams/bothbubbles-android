@@ -21,6 +21,10 @@ In code, we use "Feature" because it's a more common programming term. User-faci
 
 ```
 seam/
+├── settings/                     # Settings integration
+│   ├── SettingsContribution.kt   # Contribution model
+│   └── SettingsContributionProvider.kt  # Collects from Stitches/Features
+│
 ├── stitches/                     # Platform integrations
 │   ├── Stitch.kt                 # Core interface
 │   ├── StitchConnectionState.kt  # Connection states
@@ -39,8 +43,12 @@ seam/
     ├── FeatureRegistry.kt        # Collects via @IntoSet
     ├── _template/                # Template for new Features
     │   └── README.md
-    └── reels/
-        └── ReelsFeature.kt       # TikTok-style video feed
+    ├── reels/
+    │   └── ReelsFeature.kt       # TikTok-style video feed
+    ├── life360/
+    │   └── Life360Feature.kt     # Life360 location integration
+    └── eta/
+        └── EtaFeature.kt         # ETA sharing feature
 ```
 
 ## Creating a New Stitch
@@ -68,16 +76,34 @@ interface Stitch {
     val id: String                                  // Unique identifier (e.g., "sms", "bluebubbles")
     val displayName: String                         // User-facing name (e.g., "SMS/MMS")
     val iconResId: Int                             // Icon resource ID
-    val chatGuidPrefix: String?                    // GUID prefix (e.g., "sms;-;") or null
+    val chatGuidPrefix: String?                    // Primary GUID prefix (e.g., "sms;-;")
 
     val connectionState: StateFlow<StitchConnectionState>  // Connection status
     val isEnabled: StateFlow<Boolean>              // Whether Stitch is enabled
     val capabilities: StitchCapabilities           // Platform capabilities
 
+    fun matchesChatGuid(chatGuid: String): Boolean // Check if this Stitch handles a chat
     suspend fun initialize()                       // Called on app startup
     suspend fun teardown()                         // Called on shutdown
 
-    val settingsRoute: String?                     // Settings screen route or null
+    val settingsRoute: String?                     // Settings screen route (deprecated)
+    val settingsContribution: SettingsContribution // Settings page contribution
+}
+```
+
+### Multi-Prefix Matching
+
+The `matchesChatGuid` method handles Stitches that need multiple prefixes:
+
+```kotlin
+// Default implementation uses chatGuidPrefix
+fun matchesChatGuid(chatGuid: String): Boolean {
+    return chatGuidPrefix?.let { chatGuid.startsWith(it) } ?: false
+}
+
+// SmsStitch overrides to handle both SMS and MMS prefixes
+override fun matchesChatGuid(chatGuid: String): Boolean {
+    return chatGuid.startsWith("sms;-;") || chatGuid.startsWith("mms;-;")
 }
 ```
 
@@ -91,12 +117,76 @@ interface Feature {
     val featureFlagKey: String              // Preference key for enable/disable
 
     val isEnabled: StateFlow<Boolean>       // Whether feature is enabled
-    val settingsRoute: String?              // Settings screen route or null
+    val settingsRoute: String?              // Settings screen route (deprecated)
+    val settingsContribution: SettingsContribution  // Settings page contribution
 
     suspend fun onEnable()                  // Called when feature is enabled
     suspend fun onDisable()                 // Called when feature is disabled
 }
 ```
+
+## Settings Integration
+
+Stitches and Features can contribute to the Settings screen via `SettingsContribution`:
+
+```kotlin
+data class SettingsContribution(
+    val dedicatedMenuItem: DedicatedSettingsMenuItem? = null,  // Up to 1 dedicated menu item
+    val additionalItems: Map<SettingsSection, List<SettingsItem>> = emptyMap()  // Items in existing sections
+)
+```
+
+### Dedicated Menu Item
+
+Each Stitch/Feature can provide up to **one** dedicated settings menu item that appears in the main settings screen:
+
+```kotlin
+override val settingsContribution: SettingsContribution
+    get() = SettingsContribution(
+        dedicatedMenuItem = DedicatedSettingsMenuItem(
+            id = ID,
+            title = "Life360",
+            subtitle = "Show friends and family locations",
+            icon = Icons.Outlined.LocationOn,
+            iconTint = SettingsIconColors.Location,
+            section = SettingsSection.SHARING,  // Which section to appear in
+            route = "settings/life360",          // Navigation route
+            enabled = true
+        )
+    )
+```
+
+### Settings Sections
+
+Items are placed in predefined sections:
+
+| Section | Description |
+|---------|-------------|
+| `CONNECTIVITY` | iMessage, SMS, sync settings |
+| `NOTIFICATIONS` | Alerts, sounds, vibration |
+| `APPEARANCE` | Effects, swipe, haptics |
+| `MESSAGING` | Templates, auto-responder, media |
+| `SHARING` | ETA, Life360, calendar |
+| `PRIVACY` | Spam, blocked, categorization |
+| `DATA` | Storage, export |
+| `ABOUT` | Version, licenses |
+
+### SettingsContributionProvider
+
+The `SettingsContributionProvider` collects contributions from all Stitches and Features:
+
+```kotlin
+@Singleton
+class SettingsContributionProvider @Inject constructor(
+    private val stitchRegistry: StitchRegistry,
+    private val featureRegistry: FeatureRegistry
+) {
+    fun getMenuItemsForSection(section: SettingsSection): List<DedicatedSettingsMenuItem>
+    fun getAdditionalItemsForSection(section: SettingsSection): List<SettingsItem>
+}
+```
+
+Use it in ViewModels or Composables to dynamically render contributed settings.
 
 ## Stitch Capabilities
 
@@ -127,14 +217,124 @@ if (capabilities.supportsReactions) {
 Stitches can be in one of these connection states:
 
 ```kotlin
-sealed interface StitchConnectionState {
+sealed class StitchConnectionState {
     data object NotConfigured      // Not set up yet
-    data object Connecting          // Attempting connection
-    data object Connected           // Fully operational
-    data object Disconnected        // Connection lost
+    data object Disconnected       // Connection lost
+    data object Connecting         // Attempting connection
+    data object Connected          // Fully operational
     data class Error(val message: String)  // Error state
+
+    // Helper properties
+    val isConnected: Boolean       // True only for Connected state
+    val isError: Boolean           // True only for Error state
+    val isUsable: Boolean          // True for Connected, Disconnected, or Connecting
 }
 ```
+
+## StitchRouter
+
+The `StitchRouter` provides intelligent routing based on chat GUIDs, connection state, and capabilities:
+
+```kotlin
+@Singleton
+class StitchRouter @Inject constructor(
+    private val registry: StitchRegistry
+) {
+    // Basic routing
+    fun getStitchForChat(chatGuid: String): Stitch?
+    fun getConnectedStitchForChat(chatGuid: String): Stitch?
+    fun getConnectedStitches(): List<Stitch>
+
+    // Capability-based routing
+    fun getStitchWithCapability(requirement: (StitchCapabilities) -> Boolean): Stitch?
+    fun getStitchesWithCapability(requirement: (StitchCapabilities) -> Boolean): List<Stitch>
+
+    // Action checks (returns true if chat's stitch is connected AND supports capability)
+    fun canPerformAction(chatGuid: String, capabilityCheck: (StitchCapabilities) -> Boolean): Boolean
+    fun canReact(chatGuid: String): Boolean
+    fun canEdit(chatGuid: String): Boolean
+    fun canUnsend(chatGuid: String): Boolean
+    fun canReply(chatGuid: String): Boolean
+    fun canSendTypingIndicator(chatGuid: String): Boolean
+    fun canSendWithEffect(chatGuid: String): Boolean
+
+    // Attachment constraints
+    fun getMaxAttachmentSize(chatGuid: String): Long?
+    fun isMimeTypeSupported(chatGuid: String, mimeType: String): Boolean
+}
+```
+
+### Usage Examples
+
+```kotlin
+// Check before showing reaction button
+if (stitchRouter.canReact(chatGuid)) {
+    ReactionButton(onClick = { /* ... */ })
+}
+
+// Check MIME type before sending attachment
+if (!stitchRouter.isMimeTypeSupported(chatGuid, "image/heic")) {
+    // Convert to JPEG first
+}
+
+// Find any stitch that supports typing indicators
+val typingStitch = stitchRouter.getStitchWithCapability { it.supportsTypingIndicators }
+```
+
+## Contact Availability
+
+Stitches can check whether they can reach a specific contact identifier:
+
+```kotlin
+// Types of identifiers
+enum class ContactIdentifierType {
+    PHONE_NUMBER,  // Standard phone number
+    EMAIL,         // Email address
+    SIGNAL_ID,     // Signal-specific identifier
+    DISCORD_USERNAME  // Discord username
+}
+
+// Create an identifier
+val phoneContact = ContactIdentifier.phone("+15551234567")
+val emailContact = ContactIdentifier.email("user@icloud.com")
+
+// Check availability
+val availability = stitch.checkContactAvailability(phoneContact)
+when (availability) {
+    is ContactAvailability.Available -> // Can reach this contact
+    is ContactAvailability.Unavailable -> // Cannot reach (with reason)
+    is ContactAvailability.Unknown -> // Check failed (with fallbackHint)
+    ContactAvailability.UnsupportedIdentifierType -> // Wrong identifier type
+}
+```
+
+### Supported Identifier Types
+
+| Stitch | Phone | Email | Notes |
+|--------|-------|-------|-------|
+| SMS | Yes | No | All phone numbers reachable when default app |
+| BlueBubbles | Yes | Yes | Email always iMessage, phone needs server |
+
+### Priority Ordering
+
+Users can prioritize which Stitch to use when multiple can reach a contact:
+
+```kotlin
+// Default priorities: BlueBubbles (100), SMS (50)
+val preferred = registry.getPreferredStitch(userPriorityOrder)
+
+// Get stitches that can handle phone numbers, in priority order
+val phoneStitches = registry.getStitchesForIdentifierType(
+    ContactIdentifierType.PHONE_NUMBER,
+    userPriorityOrder
+)
+```
+
+### Platform Colors
+
+Each Stitch has a default bubble color:
+- **BlueBubbles (iMessage)**: `0xFF007AFF` (iOS blue)
+- **SMS**: `0xFF34C759` (iOS SMS green)
 
 ## Database Integration
 

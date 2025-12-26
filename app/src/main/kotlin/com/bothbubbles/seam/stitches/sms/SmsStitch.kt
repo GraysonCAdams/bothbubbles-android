@@ -1,9 +1,22 @@
 package com.bothbubbles.seam.stitches.sms
 
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CellTower
+import com.bothbubbles.seam.settings.BadgeStatus
+import com.bothbubbles.seam.settings.DedicatedSettingsMenuItem
+import com.bothbubbles.seam.settings.SettingsBadge
+import com.bothbubbles.seam.settings.SettingsContribution
+import com.bothbubbles.seam.settings.SettingsSection
+import com.bothbubbles.seam.stitches.AvailabilityCheckOptions
+import com.bothbubbles.seam.stitches.AvailabilityConfidence
+import com.bothbubbles.seam.stitches.ContactAvailability
+import com.bothbubbles.seam.stitches.ContactIdentifier
+import com.bothbubbles.seam.stitches.ContactIdentifierType
 import com.bothbubbles.seam.stitches.Stitch
 import com.bothbubbles.seam.stitches.StitchCapabilities
 import com.bothbubbles.seam.stitches.StitchConnectionState
 import com.bothbubbles.services.sms.SmsPermissionHelper
+import com.bothbubbles.ui.settings.components.SettingsIconColors
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -28,6 +41,7 @@ class SmsStitch @Inject constructor(
         const val DISPLAY_NAME = "SMS/MMS"
         const val CHAT_GUID_PREFIX_SMS = "sms;-;"
         const val CHAT_GUID_PREFIX_MMS = "mms;-;"
+        const val SETTINGS_ROUTE = "sms_settings"
     }
 
     override val id: String = ID
@@ -43,7 +57,32 @@ class SmsStitch @Inject constructor(
     private val _isEnabled = MutableStateFlow(false)
     override val isEnabled: StateFlow<Boolean> = _isEnabled.asStateFlow()
 
-    override val settingsRoute: String? = null
+    @Deprecated("Use settingsContribution instead", ReplaceWith("settingsContribution"))
+    override val settingsRoute: String = SETTINGS_ROUTE
+
+    override val settingsContribution: SettingsContribution
+        get() {
+            val currentState = connectionState.value
+            val badge = when (currentState) {
+                is StitchConnectionState.Connected -> SettingsBadge.Status(BadgeStatus.CONNECTED)
+                is StitchConnectionState.NotConfigured -> SettingsBadge.Status(BadgeStatus.DISABLED)
+                else -> SettingsBadge.Status(BadgeStatus.ERROR)
+            }
+
+            return SettingsContribution(
+                dedicatedMenuItem = DedicatedSettingsMenuItem(
+                    id = ID,
+                    title = DISPLAY_NAME,
+                    subtitle = "Local SMS messaging options",
+                    icon = Icons.Default.CellTower,
+                    iconTint = SettingsIconColors.Connectivity,
+                    section = SettingsSection.CONNECTIVITY,
+                    route = SETTINGS_ROUTE,
+                    enabled = true,
+                    badge = badge
+                )
+            )
+        }
 
     override suspend fun initialize() {
         updateConnectionState()
@@ -68,8 +107,40 @@ class SmsStitch @Inject constructor(
     /**
      * Matches both sms;-; and mms;-; prefixes.
      */
-    fun matchesChatGuid(chatGuid: String): Boolean {
+    override fun matchesChatGuid(chatGuid: String): Boolean {
         return chatGuid.startsWith(CHAT_GUID_PREFIX_SMS) ||
                chatGuid.startsWith(CHAT_GUID_PREFIX_MMS)
+    }
+
+    // ===== Contact Availability =====
+
+    override val supportedIdentifierTypes: Set<ContactIdentifierType> =
+        setOf(ContactIdentifierType.PHONE_NUMBER)
+
+    override val defaultBubbleColor: Long = 0xFF34C759  // iOS SMS green
+
+    override val contactPriority: Int = 50  // Lower than iMessage
+
+    override suspend fun checkContactAvailability(
+        identifier: ContactIdentifier,
+        options: AvailabilityCheckOptions
+    ): ContactAvailability {
+        // SMS only supports phone numbers
+        if (identifier.type != ContactIdentifierType.PHONE_NUMBER) {
+            return ContactAvailability.UnsupportedIdentifierType
+        }
+
+        // Check if SMS is functional (app is default SMS app)
+        if (connectionState.value != StitchConnectionState.Connected) {
+            return ContactAvailability.Unknown(
+                reason = "SMS not available - app is not default SMS app",
+                fallbackHint = true  // Phone numbers are always reachable in principle
+            )
+        }
+
+        // All phone numbers are reachable via SMS when we're the default app
+        return ContactAvailability.Available(
+            confidence = AvailabilityConfidence.HIGH
+        )
     }
 }

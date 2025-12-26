@@ -1,8 +1,14 @@
 package com.bothbubbles.seam.hems.eta
 
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Navigation
 import com.bothbubbles.core.data.prefs.FeaturePreferences
 import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.seam.hems.Feature
+import com.bothbubbles.seam.settings.DedicatedSettingsMenuItem
+import com.bothbubbles.seam.settings.SettingsContribution
+import com.bothbubbles.seam.settings.SettingsSection
+import com.bothbubbles.ui.settings.components.SettingsIconColors
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -44,9 +50,10 @@ class EtaFeature @Inject constructor(
 
     companion object {
         const val ID = "eta_sharing"
-        const val DISPLAY_NAME = "ETA Sharing"
+        const val DISPLAY_NAME = "ETA sharing"
         const val DESCRIPTION = "Auto-share arrival times from Google Maps and Waze"
         const val FEATURE_FLAG_KEY = "eta_sharing_enabled"
+        const val SETTINGS_ROUTE = "settings/eta"
     }
 
     override val id: String = ID
@@ -61,7 +68,22 @@ class EtaFeature @Inject constructor(
             initialValue = false
         )
 
-    override val settingsRoute: String = "settings/eta"
+    @Deprecated("Use settingsContribution instead", ReplaceWith("settingsContribution"))
+    override val settingsRoute: String = SETTINGS_ROUTE
+
+    override val settingsContribution: SettingsContribution
+        get() = SettingsContribution(
+            dedicatedMenuItem = DedicatedSettingsMenuItem(
+                id = ID,
+                title = DISPLAY_NAME,
+                subtitle = "Share arrival time while navigating",
+                icon = Icons.Outlined.Navigation,
+                iconTint = SettingsIconColors.Location,
+                section = SettingsSection.SHARING,
+                route = SETTINGS_ROUTE,
+                enabled = true
+            )
+        )
 
     override suspend fun onEnable() {
         // Called when feature is enabled via settings

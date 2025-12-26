@@ -134,6 +134,26 @@ class FeaturePreferences @Inject constructor(
         prefs[Keys.LIFE360_PAUSE_SYNCING] ?: false
     }
 
+    // ===== Discord Integration =====
+
+    /**
+     * Whether Discord integration is enabled.
+     * When enabled, users can link Discord channel IDs to contacts for quick calling.
+     */
+    val discordEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.DISCORD_ENABLED] ?: false
+    }
+
+    // ===== Calendar Integration =====
+
+    /**
+     * Whether Calendar integration is enabled.
+     * When enabled, shows contact calendar events in chat headers.
+     */
+    val calendarEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.CALENDAR_ENABLED] ?: false
+    }
+
     // ===== Social Media Downloading =====
 
     /**
@@ -341,6 +361,18 @@ class FeaturePreferences @Inject constructor(
         }
     }
 
+    suspend fun setDiscordEnabled(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.DISCORD_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setCalendarEnabled(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.CALENDAR_ENABLED] = enabled
+        }
+    }
+
     suspend fun setTiktokDownloaderEnabled(enabled: Boolean) {
         dataStore.edit { prefs ->
             prefs[Keys.TIKTOK_DOWNLOADER_ENABLED] = enabled
@@ -446,6 +478,12 @@ class FeaturePreferences @Inject constructor(
         val LIFE360_ENABLED = booleanPreferencesKey("life360_enabled")
         val LIFE360_POLL_INTERVAL = intPreferencesKey("life360_poll_interval")
         val LIFE360_PAUSE_SYNCING = booleanPreferencesKey("life360_pause_syncing")
+
+        // Discord Integration
+        val DISCORD_ENABLED = booleanPreferencesKey("discord_enabled")
+
+        // Calendar Integration
+        val CALENDAR_ENABLED = booleanPreferencesKey("calendar_enabled")
 
         // Social Media Downloading
         val TIKTOK_DOWNLOADER_ENABLED = booleanPreferencesKey("tiktok_downloader_enabled")

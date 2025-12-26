@@ -48,10 +48,14 @@ import com.bothbubbles.data.local.db.entity.UnifiedChatEntity
 import com.bothbubbles.data.local.db.entity.TombstoneEntity
 import com.bothbubbles.data.local.db.entity.VerifiedCounterpartCheckEntity
 import com.bothbubbles.data.local.db.entity.MessageEditHistoryEntity
+import com.bothbubbles.core.model.entity.AutoResponderRuleEntity
 import com.bothbubbles.core.model.entity.CalendarEventOccurrenceEntity
 import com.bothbubbles.core.model.entity.ContactCalendarAssociationEntity
 import com.bothbubbles.core.model.entity.Life360MemberEntity
+import com.bothbubbles.core.model.entity.StitchCustomColorEntity
+import com.bothbubbles.data.local.db.dao.AutoResponderRuleDao
 import com.bothbubbles.data.local.db.dao.CalendarEventOccurrenceDao
+import com.bothbubbles.data.local.db.dao.StitchCustomColorDao
 
 /**
  * Room database for BothBubbles.
@@ -88,9 +92,11 @@ import com.bothbubbles.data.local.db.dao.CalendarEventOccurrenceDao
         MessageEditHistoryEntity::class,
         ContactCalendarAssociationEntity::class,
         SocialMediaLinkEntity::class,
-        CalendarEventOccurrenceEntity::class
+        CalendarEventOccurrenceEntity::class,
+        AutoResponderRuleEntity::class,
+        StitchCustomColorEntity::class
     ],
-    version = 66,
+    version = 68,
     exportSchema = true
 )
 abstract class BothBubblesDatabase : RoomDatabase() {
@@ -121,6 +127,8 @@ abstract class BothBubblesDatabase : RoomDatabase() {
     abstract fun contactCalendarDao(): ContactCalendarDao
     abstract fun socialMediaLinkDao(): SocialMediaLinkDao
     abstract fun calendarEventOccurrenceDao(): CalendarEventOccurrenceDao
+    abstract fun autoResponderRuleDao(): AutoResponderRuleDao
+    abstract fun stitchCustomColorDao(): StitchCustomColorDao
 
     companion object {
         const val DATABASE_NAME = "bothbubbles.db"

@@ -1,13 +1,17 @@
 package com.bothbubbles.ui.settings.sms
 
 import android.content.Intent
+import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.SmsRepository
+import com.bothbubbles.data.repository.StitchSettingsRepository
+import com.bothbubbles.seam.stitches.sms.SmsStitch
 import com.bothbubbles.services.sms.SimInfo
 import com.bothbubbles.services.sms.SmsCapabilityStatus
 import com.bothbubbles.services.sms.SmsPermissionHelper
+import com.bothbubbles.ui.theme.StitchDefaultColors
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -17,7 +21,8 @@ import javax.inject.Inject
 class SmsSettingsViewModel @Inject constructor(
     private val smsRepository: SmsRepository,
     private val smsPermissionHelper: SmsPermissionHelper,
-    private val settingsDataStore: SettingsDataStore
+    private val settingsDataStore: SettingsDataStore,
+    private val stitchSettingsRepository: StitchSettingsRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SmsSettingsUiState())
@@ -26,6 +31,7 @@ class SmsSettingsViewModel @Inject constructor(
     init {
         loadSmsStatus()
         loadSettings()
+        observeCustomColor()
     }
 
     fun loadSmsStatus() {
@@ -141,6 +147,51 @@ class SmsSettingsViewModel @Inject constructor(
         _uiState.update { it.copy(resyncResult = null) }
     }
 
+    // ===== Custom Color =====
+
+    private fun observeCustomColor() {
+        viewModelScope.launch {
+            // For simplicity, we'll use light theme default here
+            // In production, you'd observe the theme state
+            stitchSettingsRepository.observeEffectiveColor(SmsStitch.ID, isDarkTheme = false)
+                .collect { color ->
+                    _uiState.update { it.copy(currentBubbleColor = color) }
+                }
+        }
+
+        viewModelScope.launch {
+            stitchSettingsRepository.observeAllCustomColors().collect { customColors ->
+                val hasCustom = customColors.containsKey(SmsStitch.ID)
+                _uiState.update { it.copy(isUsingDefaultColor = !hasCustom) }
+            }
+        }
+    }
+
+    /**
+     * Set a custom bubble color for SMS messages.
+     */
+    fun setCustomColor(color: Color) {
+        viewModelScope.launch {
+            stitchSettingsRepository.setCustomColor(SmsStitch.ID, color)
+        }
+    }
+
+    /**
+     * Reset the bubble color to the default SMS green.
+     */
+    fun resetColorToDefault() {
+        viewModelScope.launch {
+            stitchSettingsRepository.resetColorToDefault(SmsStitch.ID)
+        }
+    }
+
+    /**
+     * Get the default bubble color for SMS.
+     */
+    fun getDefaultColor(): Color {
+        return StitchDefaultColors.getDefaultBubbleColor(SmsStitch.ID, isDarkTheme = false)
+    }
+
     /**
      * Manually re-sync SMS messages from the system SMS provider.
      * This imports any SMS messages that may have been missed
@@ -195,5 +246,8 @@ data class SmsSettingsUiState(
     val selectedSimSlot: Int = -1,
     val error: String? = null,
     val isResyncing: Boolean = false,
-    val resyncResult: String? = null
+    val resyncResult: String? = null,
+    // Bubble color customization
+    val currentBubbleColor: Color = StitchDefaultColors.getDefaultBubbleColor(SmsStitch.ID, false),
+    val isUsingDefaultColor: Boolean = true
 )
